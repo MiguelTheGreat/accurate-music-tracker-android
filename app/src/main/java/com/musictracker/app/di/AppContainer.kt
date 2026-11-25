@@ -20,6 +20,14 @@ import com.musictracker.app.domain.normalization.MetadataNormalizer
 import com.musictracker.app.domain.normalization.MusicMetadataNormalizer
 import com.musictracker.app.domain.tracking.PlaySessionEngine
 import com.musictracker.app.domain.tracking.PlaySessionStateMachine
+import com.musictracker.app.tracking.AndroidSystemPermissionHelper
+import com.musictracker.app.tracking.MediaSessionCoordinator
+import com.musictracker.app.tracking.SystemPermissionHelper
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.StateFlow
 
 class AppContainer(
     context: Context,
@@ -28,7 +36,10 @@ class AppContainer(
     val playSessionEngine: PlaySessionEngine = PlaySessionStateMachine(
         clock = clock,
         normalizer = metadataNormalizer
-    )
+    ),
+    val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    val schedulerDispatcher: CoroutineDispatcher = Dispatchers.Default,
+    val applicationScope: CoroutineScope = CoroutineScope(SupervisorJob() + schedulerDispatcher)
 ) {
     private val appContext = context.applicationContext
 
@@ -68,6 +79,25 @@ class AppContainer(
             clock = clock
         )
     }
+
+    val systemPermissionHelper: SystemPermissionHelper by lazy {
+        AndroidSystemPermissionHelper(appContext)
+    }
+
+    val mediaSessionCoordinator: MediaSessionCoordinator by lazy {
+        MediaSessionCoordinator(
+            playSessionEngine = playSessionEngine,
+            allowlistRepository = allowlistRepository,
+            listeningRepository = listeningRepository,
+            clock = clock,
+            scope = applicationScope,
+            ioDispatcher = ioDispatcher,
+            schedulerDispatcher = schedulerDispatcher
+        )
+    }
+
+    val isListenerConnected: StateFlow<Boolean>
+        get() = mediaSessionCoordinator.isListenerConnected
 
     companion object {
         private const val PREFERENCES_FILE_NAME = "music_tracker_prefs"
