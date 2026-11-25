@@ -1,0 +1,23 @@
+# Teamwork & agent metadata
+.agents/
+
+# Gradle & Build outputs
+.gradle/
+build/
+app/build/
+captures/
+.cxx/
+
+# Local environment / IDE
+local.properties
+*.iml
+.idea/
+.DS_Store
+*.jks
+*.keystore
+
+# APK / AAB artifacts
+*.apk
+*.aab
+*.ap_
+*.dex
