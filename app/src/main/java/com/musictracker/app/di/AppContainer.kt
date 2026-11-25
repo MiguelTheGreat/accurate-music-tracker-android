@@ -16,13 +16,19 @@ import com.musictracker.app.data.preferences.AllowlistStore
 import com.musictracker.app.data.repository.ListeningRepository
 import com.musictracker.app.data.repository.ListeningRepositoryImpl
 import com.musictracker.app.domain.clock.TrackerClock
-import com.musictracker.app.domain.normalization.CanonicalMetadataNormalizer
 import com.musictracker.app.domain.normalization.MetadataNormalizer
+import com.musictracker.app.domain.normalization.MusicMetadataNormalizer
+import com.musictracker.app.domain.tracking.PlaySessionEngine
+import com.musictracker.app.domain.tracking.PlaySessionStateMachine
 
 class AppContainer(
     context: Context,
     val clock: TrackerClock = SystemTrackerClock(),
-    val metadataNormalizer: MetadataNormalizer = CanonicalMetadataNormalizer()
+    val metadataNormalizer: MetadataNormalizer = MusicMetadataNormalizer(),
+    val playSessionEngine: PlaySessionEngine = PlaySessionStateMachine(
+        clock = clock,
+        normalizer = metadataNormalizer
+    )
 ) {
     private val appContext = context.applicationContext
 

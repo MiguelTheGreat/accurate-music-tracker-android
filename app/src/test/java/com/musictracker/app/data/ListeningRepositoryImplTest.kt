@@ -10,6 +10,7 @@ import com.musictracker.app.domain.model.CompletedListenSession
 import com.musictracker.app.domain.model.ListeningSummary
 import com.musictracker.app.domain.normalization.CanonicalMetadataNormalizer
 import com.musictracker.app.domain.normalization.MetadataNormalizer
+import com.musictracker.app.domain.normalization.MusicMetadataNormalizer
 import com.musictracker.app.domain.normalization.NormalizedTrack
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
@@ -321,5 +322,118 @@ class ListeningRepositoryImplTest {
         assertEquals(2, tracks.size)
         assertEquals("Beta", tracks[0].normalizedTitle)
         assertEquals("Alpha", tracks[1].normalizedTitle)
+    }
+
+    @Test
+    fun renormalizeAllTracks_withMusicMetadataNormalizer_mergesLegacyVariantsAndPreservesRawFields() = runTest {
+        val legacyRepo = ListeningRepositoryImpl(database, CanonicalMetadataNormalizer())
+
+        // Track A (YT Music noisy, 2 events, missing album/duration/artwork)
+        repeat(2) { i ->
+            legacyRepo.recordCompletedSession(
+                CompletedListenSession(
+                    sourcePackage = "com.google.android.apps.youtube.music",
+                    rawTitle = "Blinding Lights (Official Audio) [Lyrics]",
+                    rawArtist = "The Weeknd - Topic",
+                    album = "",
+                    durationMs = 0L,
+                    artworkUri = null,
+                    startedAtEpoch = 10_000L + i * 200_000L,
+                    endedAtEpoch = 160_000L + i * 200_000L,
+                    actualListenedMs = 150_000L,
+                    completedRatio = 0f,
+                    wasSkipped = false
+                )
+            )
+        }
+
+        // Track B (YT Music unpacked generic artist, 1 event)
+        legacyRepo.recordCompletedSession(
+            CompletedListenSession(
+                sourcePackage = "com.google.android.apps.youtube.music",
+                rawTitle = "The Weeknd - Blinding Lights | Official Video",
+                rawArtist = "YouTube Music",
+                album = "",
+                durationMs = 200_000L,
+                artworkUri = null,
+                startedAtEpoch = 500_000L,
+                endedAtEpoch = 680_000L,
+                actualListenedMs = 180_000L,
+                completedRatio = 0.9f,
+                wasSkipped = false
+            )
+        )
+
+        // Track C (Spotify clean, 2 events, full metadata)
+        repeat(2) { i ->
+            legacyRepo.recordCompletedSession(
+                CompletedListenSession(
+                    sourcePackage = "com.spotify.music",
+                    rawTitle = "Blinding Lights",
+                    rawArtist = "The Weeknd",
+                    album = "After Hours",
+                    durationMs = 200_000L,
+                    artworkUri = "content://art/after_hours",
+                    startedAtEpoch = 800_000L + i * 250_000L,
+                    endedAtEpoch = 1_000_000L + i * 250_000L,
+                    actualListenedMs = 200_000L,
+                    completedRatio = 1.0f,
+                    wasSkipped = false
+                )
+            )
+        }
+
+        // Track D (Valid artist with spaced dash in title, 1 event)
+        legacyRepo.recordCompletedSession(
+            CompletedListenSession(
+                sourcePackage = "com.google.android.apps.youtube.music",
+                rawTitle = "One More Time - Radio Edit (Official Video)",
+                rawArtist = "Daft Punk",
+                album = "Discovery",
+                durationMs = 235_000L,
+                artworkUri = null,
+                startedAtEpoch = 1_500_000L,
+                endedAtEpoch = 1_700_000L,
+                actualListenedMs = 200_000L,
+                completedRatio = 0.85f,
+                wasSkipped = false
+            )
+        )
+
+        assertEquals(4, database.trackDao().getAll().size)
+        assertEquals(6, database.listenEventDao().getAll().size)
+
+        val upgradedRepo = ListeningRepositoryImpl(database, MusicMetadataNormalizer())
+        val affected = upgradedRepo.renormalizeAllTracks()
+        assertEquals(4, affected) // 2 merged duplicates + 2 updated survivors
+
+        val survivingTracks = database.trackDao().getAll()
+        val allEvents = database.listenEventDao().getAll()
+        assertEquals(2, survivingTracks.size)
+        assertEquals(6, allEvents.size)
+
+        val blindingSurvivor = survivingTracks.first { it.dedupKey == "the weeknd::blinding lights" }
+        assertEquals("Blinding Lights", blindingSurvivor.normalizedTitle)
+        assertEquals("The Weeknd", blindingSurvivor.normalizedArtist)
+        assertEquals("Blinding Lights (Official Audio) [Lyrics]", blindingSurvivor.rawTitle)
+        assertEquals("The Weeknd - Topic", blindingSurvivor.rawArtist)
+        assertEquals("After Hours", blindingSurvivor.album)
+        assertEquals(200_000L, blindingSurvivor.durationMs)
+        assertEquals("content://art/after_hours", blindingSurvivor.artworkUriOrHash)
+        assertEquals(5, allEvents.count { it.trackId == blindingSurvivor.id })
+
+        val daftPunkSurvivor = survivingTracks.first { it.dedupKey == "daft punk::one more time radio edit" }
+        assertEquals("One More Time - Radio Edit", daftPunkSurvivor.normalizedTitle)
+        assertEquals("Daft Punk", daftPunkSurvivor.normalizedArtist)
+        assertEquals("One More Time - Radio Edit (Official Video)", daftPunkSurvivor.rawTitle)
+        assertEquals(1, allEvents.count { it.trackId == daftPunkSurvivor.id })
+
+        val topTracks = upgradedRepo.observeTopTracks(0L).first()
+        assertEquals(2, topTracks.size)
+        assertEquals(880_000L, topTracks[0].totalListenedMs)
+        assertEquals(5, topTracks[0].playCount)
+
+        // Second run must be idempotent
+        assertEquals(0, upgradedRepo.renormalizeAllTracks())
     }
 }

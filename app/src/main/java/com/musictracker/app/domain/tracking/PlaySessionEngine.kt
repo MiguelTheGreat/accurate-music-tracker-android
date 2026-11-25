@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.StateFlow
 interface PlaySessionEngine {
     val nowTracking: StateFlow<NowTrackingState?>
     fun onPlaybackEvent(event: PlaybackEvent): List<CompletedListenSession>
+    fun onTick(): List<CompletedListenSession> = onPlaybackEvent(PlaybackEvent.Tick)
     fun onSessionEnded(sourcePackage: String): List<CompletedListenSession>
     fun flushActiveSession(): List<CompletedListenSession>
 }

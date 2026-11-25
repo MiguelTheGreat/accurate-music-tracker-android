@@ -120,9 +120,9 @@ Every Survey feature is assigned a Milestone (zero unassigned):
 
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|--------------|--------|
-| M1 | Project Scaffold, Room DB, DAOs, Preferences & Data Exporter | F00, F07, F18 (schema), F19, F20, F21 (exporter), F22 (exporter) + Robolectric Room/Export tests | none | IN_PROGRESS (`4cb6a1f04b26f655c2877fd7ebfc4748`) |
-| M2 | Play-Session State Machine & Metadata Normalizer | F09, F10, F11, F12, F13, F14, F15, F16, F17, F18 (logic) + exhaustive JVM unit tests | M1 | PLANNED |
-| M3 | Core Tracking Engine (`NotificationListenerService` + `MediaSessionManager`) | F01, F02, F03, F04, F05, F06, F08 + Robolectric service/coordinator/DB integration tests | M1, M2 | PLANNED |
+| M1 | Project Scaffold, Room DB, DAOs, Preferences & Data Exporter | F00, F07, F18 (schema), F19, F20, F21 (exporter), F22 (exporter) + Robolectric Room/Export tests | none | DONE (26/26 tests pass, CLEAN audit) |
+| M2 | Play-Session State Machine & Metadata Normalizer | F09, F10, F11, F12, F13, F14, F15, F16, F17, F18 (logic) + exhaustive JVM unit tests | M1 | DONE (64/64 tests pass, CLEAN audit) |
+| M3 | Core Tracking Engine (`NotificationListenerService` + `MediaSessionManager`) | F01, F02, F03, F04, F05, F06, F08 + Robolectric service/coordinator/DB integration tests | M1, M2 | IN_PROGRESS (`1a08bdbfec9d61d382011857b39f5393`) |
 | M4 | Liquid Glass Design System & Jetpack Compose UI | F21 (UI SAF), F22 (UI SAF), F23, F24, F25, F26 + ViewModel & Robolectric Compose UI tests | M1, M2, M3 | PLANNED |
 | E2E | E2E Testing Track (Opaque-Box Tiers 1–4) | Independent requirement-driven 4-tier test suite (`TEST_INFRA.md`, `app/src/test/java/com/musictracker/app/e2e/`, `TEST_READY.md`) | M1 (for Gradle execution; design starts immediately) | IN_PROGRESS (`f51ede0a5e42f722a5aa842dc902dfe2`) |
 | M5 | Final Milestone (E2E Pass + Tier 5 Hardening) | Phase 1: pass 100% E2E Tiers 1–4; Phase 2: Tier 5 adversarial white-box hardening | M4, E2E (`TEST_READY.md`) | PLANNED |
