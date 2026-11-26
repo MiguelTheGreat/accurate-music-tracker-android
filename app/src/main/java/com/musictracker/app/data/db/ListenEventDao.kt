@@ -3,9 +3,12 @@ package com.musictracker.app.data.db
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
+import com.musictracker.app.domain.model.ArtistDetailStats
+import com.musictracker.app.domain.model.ListenEventInsightSample
 import com.musictracker.app.domain.model.RecentListenItem
 import com.musictracker.app.domain.model.TopArtistStat
 import com.musictracker.app.domain.model.TopTrackStat
+import com.musictracker.app.domain.model.TrackDetailStats
 import kotlinx.coroutines.flow.Flow
 
 data class ListeningSummaryRow(
@@ -96,4 +99,127 @@ interface ListenEventDao {
         """
     )
     fun observeTopArtists(sinceEpochMs: Long, limit: Int): Flow<List<TopArtistStat>>
+
+    @Query(
+        """
+        SELECT
+            t.id AS trackId,
+            t.normalized_title AS title,
+            t.normalized_artist AS artist,
+            t.album AS album,
+            t.artwork_uri_or_hash AS artworkUri,
+            COUNT(e.id) AS playCount,
+            COALESCE(SUM(e.actual_listened_ms), 0) AS totalListenedMs,
+            COALESCE(SUM(CASE WHEN e.was_skipped = 1 THEN 1 ELSE 0 END), 0) AS skippedCount,
+            MIN(e.started_at_epoch) AS firstHeardEpoch,
+            MAX(e.started_at_epoch) AS lastHeardEpoch
+        FROM tracks t
+        LEFT JOIN listen_events e
+            ON e.track_id = t.id AND e.started_at_epoch >= :sinceEpochMs
+        WHERE t.id = :trackId
+        GROUP BY t.id
+        """
+    )
+    fun observeTrackDetail(trackId: Long, sinceEpochMs: Long): Flow<TrackDetailStats?>
+
+    @Query(
+        """
+        SELECT
+            COALESCE(MIN(t.normalized_artist), :artistName) AS artist,
+            COUNT(e.id) AS playCount,
+            COALESCE(SUM(e.actual_listened_ms), 0) AS totalListenedMs,
+            COALESCE(SUM(CASE WHEN e.was_skipped = 1 THEN 1 ELSE 0 END), 0) AS skippedCount,
+            COUNT(DISTINCT t.id) AS uniqueTrackCount,
+            MIN(e.started_at_epoch) AS firstHeardEpoch,
+            MAX(e.started_at_epoch) AS lastHeardEpoch
+        FROM listen_events e
+        INNER JOIN tracks t ON e.track_id = t.id
+        WHERE e.started_at_epoch >= :sinceEpochMs
+          AND (
+              LOWER(t.normalized_artist) = LOWER(:artistName)
+              OR (
+                  CASE WHEN INSTR(t.dedup_key, '::') > 1
+                      THEN SUBSTR(t.dedup_key, 1, INSTR(t.dedup_key, '::') - 1)
+                      ELSE LOWER(t.normalized_artist)
+                  END
+              ) = (
+                  SELECT
+                      CASE WHEN INSTR(t2.dedup_key, '::') > 1
+                          THEN SUBSTR(t2.dedup_key, 1, INSTR(t2.dedup_key, '::') - 1)
+                          ELSE LOWER(t2.normalized_artist)
+                      END
+                  FROM tracks t2
+                  WHERE LOWER(t2.normalized_artist) = LOWER(:artistName)
+                  LIMIT 1
+              )
+          )
+        GROUP BY CASE WHEN INSTR(t.dedup_key, '::') > 1
+            THEN SUBSTR(t.dedup_key, 1, INSTR(t.dedup_key, '::') - 1)
+            ELSE LOWER(t.normalized_artist)
+        END
+        HAVING COUNT(e.id) > 0
+        LIMIT 1
+        """
+    )
+    fun observeArtistDetail(artistName: String, sinceEpochMs: Long): Flow<ArtistDetailStats?>
+
+    @Query(
+        """
+        SELECT
+            t.id AS trackId,
+            t.normalized_title AS title,
+            t.normalized_artist AS artist,
+            t.album AS album,
+            t.artwork_uri_or_hash AS artworkUri,
+            COALESCE(SUM(e.actual_listened_ms), 0) AS totalListenedMs,
+            COUNT(e.id) AS playCount
+        FROM listen_events e
+        INNER JOIN tracks t ON e.track_id = t.id
+        WHERE e.started_at_epoch >= :sinceEpochMs
+          AND (
+              LOWER(t.normalized_artist) = LOWER(:artistName)
+              OR (
+                  CASE WHEN INSTR(t.dedup_key, '::') > 1
+                      THEN SUBSTR(t.dedup_key, 1, INSTR(t.dedup_key, '::') - 1)
+                      ELSE LOWER(t.normalized_artist)
+                  END
+              ) = (
+                  SELECT
+                      CASE WHEN INSTR(t2.dedup_key, '::') > 1
+                          THEN SUBSTR(t2.dedup_key, 1, INSTR(t2.dedup_key, '::') - 1)
+                          ELSE LOWER(t2.normalized_artist)
+                      END
+                  FROM tracks t2
+                  WHERE LOWER(t2.normalized_artist) = LOWER(:artistName)
+                  LIMIT 1
+              )
+          )
+        GROUP BY t.id
+        ORDER BY totalListenedMs DESC, playCount DESC, t.id ASC
+        LIMIT :limit
+        """
+    )
+    fun observeTopTracksForArtist(
+        artistName: String,
+        sinceEpochMs: Long,
+        limit: Int = 5
+    ): Flow<List<TopTrackStat>>
+
+    @Query(
+        """
+        SELECT
+            e.started_at_epoch AS startedAtEpoch,
+            e.actual_listened_ms AS actualListenedMs,
+            e.track_id AS trackId,
+            CASE WHEN INSTR(t.dedup_key, '::') > 1
+                THEN SUBSTR(t.dedup_key, 1, INSTR(t.dedup_key, '::') - 1)
+                ELSE LOWER(t.normalized_artist)
+            END AS artistKey,
+            e.was_skipped AS wasSkipped
+        FROM listen_events e
+        INNER JOIN tracks t ON e.track_id = t.id
+        ORDER BY e.started_at_epoch ASC
+        """
+    )
+    fun observeAllListenEventTimestamps(): Flow<List<ListenEventInsightSample>>
 }

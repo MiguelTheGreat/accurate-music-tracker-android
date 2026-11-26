@@ -6,11 +6,14 @@ import com.musictracker.app.data.db.ListenEventEntity
 import com.musictracker.app.data.db.MusicTrackerDatabase
 import com.musictracker.app.data.db.TrackDao
 import com.musictracker.app.data.db.TrackEntity
+import com.musictracker.app.domain.model.ArtistDetailStats
 import com.musictracker.app.domain.model.CompletedListenSession
+import com.musictracker.app.domain.model.ListenEventInsightSample
 import com.musictracker.app.domain.model.ListeningSummary
 import com.musictracker.app.domain.model.RecentListenItem
 import com.musictracker.app.domain.model.TopArtistStat
 import com.musictracker.app.domain.model.TopTrackStat
+import com.musictracker.app.domain.model.TrackDetailStats
 import com.musictracker.app.domain.normalization.MetadataNormalizer
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -98,6 +101,22 @@ class ListeningRepositoryImpl(
 
     override fun observeTopArtists(sinceEpochMs: Long, limit: Int): Flow<List<TopArtistStat>> =
         listenEventDao.observeTopArtists(sinceEpochMs, limit)
+
+    override fun observeTrackDetail(trackId: Long, sinceEpochMs: Long): Flow<TrackDetailStats?> =
+        listenEventDao.observeTrackDetail(trackId, sinceEpochMs)
+
+    override fun observeArtistDetail(artistName: String, sinceEpochMs: Long): Flow<ArtistDetailStats?> =
+        listenEventDao.observeArtistDetail(artistName, sinceEpochMs)
+
+    override fun observeTopTracksForArtist(
+        artistName: String,
+        sinceEpochMs: Long,
+        limit: Int
+    ): Flow<List<TopTrackStat>> =
+        listenEventDao.observeTopTracksForArtist(artistName, sinceEpochMs, limit)
+
+    override fun observeAllListenEventTimestamps(): Flow<List<ListenEventInsightSample>> =
+        listenEventDao.observeAllListenEventTimestamps()
 
     override suspend fun renormalizeAllTracks(): Int = database.withTransaction {
         val allTracks = trackDao.getAll()

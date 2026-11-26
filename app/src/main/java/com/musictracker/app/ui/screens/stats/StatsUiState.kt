@@ -1,10 +1,13 @@
 package com.musictracker.app.ui.screens.stats
 
 import androidx.compose.runtime.Immutable
+import com.musictracker.app.domain.model.ArtistDetailStats
+import com.musictracker.app.domain.model.ListeningInsights
 import com.musictracker.app.domain.model.ListeningSummary
 import com.musictracker.app.domain.model.StatsTimeframe
 import com.musictracker.app.domain.model.TopArtistStat
 import com.musictracker.app.domain.model.TopTrackStat
+import com.musictracker.app.domain.model.TrackDetailStats
 
 @Immutable
 data class StatsUiState(
@@ -12,5 +15,10 @@ data class StatsUiState(
     val summary: ListeningSummary = ListeningSummary(),
     val topTracks: List<TopTrackStat> = emptyList(),
     val topArtists: List<TopArtistStat> = emptyList(),
+    val insights: ListeningInsights = ListeningInsights(),
+    val drillDownTarget: DrillDownTarget? = null,
+    val selectedTrackDetail: TrackDetailStats? = null,
+    val selectedArtistDetail: ArtistDetailStats? = null,
+    val selectedArtistTopTracks: List<TopTrackStat> = emptyList(),
     val isLoading: Boolean = true
 )

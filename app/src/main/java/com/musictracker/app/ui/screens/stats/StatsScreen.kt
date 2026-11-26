@@ -26,13 +26,18 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -55,8 +60,13 @@ import com.musictracker.app.ui.components.content.ArtworkThumbnail
 import com.musictracker.app.ui.components.content.EmptyStateView
 import com.musictracker.app.ui.components.content.StandardMaterialCard
 import com.musictracker.app.ui.components.content.deterministicArtworkColors
+import com.musictracker.app.ui.components.glass.LiquidGlassButton
 import com.musictracker.app.ui.components.glass.LiquidGlassSegmentedControl
+import com.musictracker.app.ui.components.glass.LiquidGlassVariant
 import com.musictracker.app.ui.navigation.TestTags
+import com.musictracker.app.ui.share.ShareCardMode
+import com.musictracker.app.ui.share.ShareCardSheet
+import com.musictracker.app.ui.share.ShareSheetInitialConfig
 import com.musictracker.app.ui.theme.LiquidGlassMotion
 import com.musictracker.app.ui.theme.LiquidGlassShapes
 import com.musictracker.app.ui.theme.LiquidGlassTheme
@@ -69,6 +79,7 @@ fun StatsRoute(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    var shareSheetConfig by remember { mutableStateOf<ShareSheetInitialConfig?>(null) }
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         viewModel.refresh()
@@ -77,15 +88,68 @@ fun StatsRoute(
     StatsScreenContent(
         uiState = uiState,
         onSelectTimeframe = viewModel::selectTimeframe,
+        onTrackClick = viewModel::openTrackDetail,
+        onArtistClick = viewModel::openArtistDetail,
+        onShareClick = {
+            shareSheetConfig = ShareSheetInitialConfig(
+                mode = ShareCardMode.LISTENING_SUMMARY
+            )
+        },
         modifier = modifier
     )
+
+    val drillDownTarget = uiState.drillDownTarget
+    if (drillDownTarget != null) {
+        DrillDownSheet(
+            target = drillDownTarget,
+            timeframe = uiState.selectedTimeframe,
+            trackDetail = uiState.selectedTrackDetail,
+            artistDetail = uiState.selectedArtistDetail,
+            artistTopTracks = uiState.selectedArtistTopTracks,
+            onShareTrack = { track ->
+                viewModel.dismissDrillDown()
+                shareSheetConfig = ShareSheetInitialConfig(
+                    mode = ShareCardMode.TOP_MUSIC,
+                    featuredTrack = track
+                )
+            },
+            onShareArtist = { artist, artistTracks ->
+                viewModel.dismissDrillDown()
+                shareSheetConfig = ShareSheetInitialConfig(
+                    mode = ShareCardMode.TOP_ARTIST,
+                    featuredArtist = artist,
+                    artistTopTracks = artistTracks
+                )
+            },
+            onDismiss = viewModel::dismissDrillDown
+        )
+    }
+
+    val activeShareConfig = shareSheetConfig
+    if (activeShareConfig != null) {
+        ShareCardSheet(
+            initialConfig = activeShareConfig,
+            timeframe = uiState.selectedTimeframe,
+            summary = uiState.summary,
+            topTracks = uiState.topTracks,
+            topArtists = uiState.topArtists,
+            streakDays = uiState.insights.streak.currentStreakDays,
+            peakHour = uiState.insights.rhythm.peakHour,
+            onSelectTimeframe = viewModel::selectTimeframe,
+            onDismiss = { shareSheetConfig = null },
+            artworkResolver = viewModel.artworkResolver
+        )
+    }
 }
 
 @Composable
 fun StatsScreenContent(
     uiState: StatsUiState,
     onSelectTimeframe: (StatsTimeframe) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onTrackClick: (TopTrackStat) -> Unit = {},
+    onArtistClick: (TopArtistStat) -> Unit = {},
+    onShareClick: () -> Unit = {}
 ) {
     val colors = LiquidGlassTheme.colors
     val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
@@ -118,11 +182,32 @@ fun StatsScreenContent(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item(key = "stats_header") {
-            Text(
-                text = "Listening Insights",
-                style = MaterialTheme.typography.headlineMedium,
-                color = colors.labelPrimary
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Listening Insights",
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = colors.labelPrimary
+                )
+                LiquidGlassButton(
+                    onClick = onShareClick,
+                    variant = LiquidGlassVariant.Regular,
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Share,
+                        contentDescription = "Share listening insights",
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = "Share",
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                }
+            }
         }
 
         item(key = "stats_timeframe") {
@@ -237,6 +322,7 @@ fun StatsScreenContent(
                                 if (topFiveTracks.isNotEmpty()) {
                                     TopTracksCard(
                                         tracks = topFiveTracks,
+                                        onTrackClick = onTrackClick,
                                         modifier = Modifier.testTag(TestTags.STATS_TOP_TRACKS_LIST)
                                     )
                                 } else {
@@ -250,6 +336,7 @@ fun StatsScreenContent(
                                 if (topFiveArtists.isNotEmpty()) {
                                     TopArtistsCard(
                                         artists = topFiveArtists,
+                                        onArtistClick = onArtistClick,
                                         modifier = Modifier.testTag(TestTags.STATS_TOP_ARTISTS_LIST)
                                     )
                                 } else {
@@ -262,6 +349,19 @@ fun StatsScreenContent(
                         }
                     }
                 }
+            }
+
+            item(key = "stats_listening_rhythm") {
+                ListeningRhythmCard(rhythm = uiState.insights.rhythm)
+            }
+        }
+
+        if (uiState.insights.milestones.isNotEmpty() || uiState.insights.streak.activeDaysCount > 0) {
+            item(key = "stats_streaks_milestones") {
+                StreaksAndMilestonesSection(
+                    streak = uiState.insights.streak,
+                    milestones = uiState.insights.milestones
+                )
             }
         }
     }
@@ -327,6 +427,7 @@ private fun OverviewMetric(
 @Composable
 private fun TopTracksCard(
     tracks: List<TopTrackStat>,
+    onTrackClick: (TopTrackStat) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val colors = LiquidGlassTheme.colors
@@ -345,6 +446,7 @@ private fun TopTracksCard(
                 rank = index + 1,
                 track = track,
                 relativeRatio = ratio,
+                onClick = { onTrackClick(track) },
                 modifier = Modifier.testTag(TestTags.statsTrackItem(track.trackId))
             )
             if (index < tracks.lastIndex) {
@@ -362,6 +464,7 @@ private fun TopTrackRow(
     rank: Int,
     track: TopTrackStat,
     relativeRatio: Float,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val colors = LiquidGlassTheme.colors
@@ -376,6 +479,7 @@ private fun TopTrackRow(
     Column(
         modifier = modifier
             .fillMaxWidth()
+            .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
@@ -440,6 +544,7 @@ private fun TopTrackRow(
 @Composable
 private fun TopArtistsCard(
     artists: List<TopArtistStat>,
+    onArtistClick: (TopArtistStat) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val colors = LiquidGlassTheme.colors
@@ -458,6 +563,7 @@ private fun TopArtistsCard(
                 rank = index + 1,
                 artist = artist,
                 relativeRatio = ratio,
+                onClick = { onArtistClick(artist) },
                 modifier = Modifier.testTag(TestTags.statsArtistItem(index))
             )
             if (index < artists.lastIndex) {
@@ -475,6 +581,7 @@ private fun TopArtistRow(
     rank: Int,
     artist: TopArtistStat,
     relativeRatio: Float,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val colors = LiquidGlassTheme.colors
@@ -500,6 +607,7 @@ private fun TopArtistRow(
     Column(
         modifier = modifier
             .fillMaxWidth()
+            .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
