@@ -1,5 +1,10 @@
 package com.musictracker.app.ui.navigation
 
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -34,6 +39,8 @@ import com.musictracker.app.ui.screens.settings.SettingsViewModel
 import com.musictracker.app.ui.screens.stats.StatsRoute
 import com.musictracker.app.ui.screens.stats.StatsViewModel
 import com.musictracker.app.ui.theme.LiquidGlassTheme
+
+private const val NAV_TRANSITION_DURATION_MS = 120
 
 @Composable
 fun MusicTrackerNavHost(
@@ -111,12 +118,14 @@ fun MusicTrackerNavHost(
                         selectedId = currentRoute,
                         onSelect = { targetRoute ->
                             isNavBarMinimized = false
-                            navController.navigate(targetRoute) {
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
+                            if (targetRoute != currentRoute) {
+                                navController.navigate(targetRoute) {
+                                    popUpTo(navController.graph.findStartDestination().id) {
+                                        saveState = true
+                                    }
+                                    launchSingleTop = true
+                                    restoreState = true
                                 }
-                                launchSingleTop = true
-                                restoreState = true
                             }
                         },
                         isMinimized = isNavBarMinimized && !accessibility.reduceMotion,
@@ -126,9 +135,24 @@ fun MusicTrackerNavHost(
             }
         }
     ) {
+        val enterAnim = if (accessibility.reduceMotion) {
+            EnterTransition.None
+        } else {
+            fadeIn(animationSpec = tween(NAV_TRANSITION_DURATION_MS))
+        }
+        val exitAnim = if (accessibility.reduceMotion) {
+            ExitTransition.None
+        } else {
+            fadeOut(animationSpec = tween(NAV_TRANSITION_DURATION_MS))
+        }
+
         NavHost(
             navController = navController,
             startDestination = AppDestination.HOME.route,
+            enterTransition = { enterAnim },
+            exitTransition = { exitAnim },
+            popEnterTransition = { enterAnim },
+            popExitTransition = { exitAnim },
             modifier = Modifier
                 .fillMaxSize()
                 .nestedScroll(navScrollConnection)

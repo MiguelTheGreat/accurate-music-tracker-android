@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import java.time.ZoneId
@@ -30,12 +31,13 @@ class StatsViewModel(
     val uiState: StateFlow<StatsUiState> = combine(
         selectedTimeframeFlow,
         refreshTickFlow
-    ) { timeframe, _ -> timeframe }.flatMapLatest { timeframe ->
-        val sinceEpochMs = computeTimeframeSinceEpochMs(
+    ) { timeframe, _ ->
+        timeframe to computeTimeframeSinceEpochMs(
             timeframe = timeframe,
             nowEpochMs = clock.currentTimeMillis(),
             zoneId = zoneId
         )
+    }.distinctUntilChanged().flatMapLatest { (timeframe, sinceEpochMs) ->
         combine(
             listeningRepository.observeSummary(sinceEpochMs),
             listeningRepository.observeTopTracks(sinceEpochMs, limit = TOP_LIST_LIMIT),
