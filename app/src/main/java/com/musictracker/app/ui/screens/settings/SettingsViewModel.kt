@@ -40,7 +40,8 @@ class SettingsViewModel(
     private val setOnlineArtworkEnabled: suspend (Boolean) -> Unit = {},
     private val runLibraryCleanup: suspend () -> LibraryCleanupResult = { LibraryCleanupResult() },
     private val themeModeFlow: Flow<ThemeMode> = flowOf(ThemeMode.SYSTEM),
-    private val setThemeMode: suspend (ThemeMode) -> Unit = {}
+    private val setThemeMode: suspend (ThemeMode) -> Unit = {},
+    private val onLibraryCleaned: () -> Unit = {}
 ) : ViewModel() {
 
     constructor(
@@ -51,7 +52,8 @@ class SettingsViewModel(
         ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
         artworkPreferencesStore: ArtworkPreferencesStore? = null,
         listeningRepository: ListeningRepository? = null,
-        themePreferencesStore: ThemePreferencesStore? = null
+        themePreferencesStore: ThemePreferencesStore? = null,
+        onLibraryCleaned: () -> Unit = {}
     ) : this(
         systemPermissionHelper = systemPermissionHelper,
         allowlistRepository = allowlistRepository,
@@ -71,7 +73,8 @@ class SettingsViewModel(
         themeModeFlow = themePreferencesStore?.themeMode ?: flowOf(ThemeMode.SYSTEM),
         setThemeMode = { mode ->
             themePreferencesStore?.setThemeMode(mode)
-        }
+        },
+        onLibraryCleaned = onLibraryCleaned
     )
 
     private val isNotificationAccessGrantedFlow = MutableStateFlow(
@@ -241,6 +244,9 @@ class SettingsViewModel(
             val feedback = withContext(ioDispatcher) {
                 runCatching {
                     val result = runLibraryCleanup()
+                    if (result.hasChanges) {
+                        onLibraryCleaned()
+                    }
                     formatCleanupFeedback(result)
                 }.getOrElse { throwable ->
                     if (throwable is CancellationException) throw throwable
@@ -352,7 +358,8 @@ class SettingsViewModel(
                         ioDispatcher = appContainer.ioDispatcher,
                         artworkPreferencesStore = appContainer.artworkPreferencesStore,
                         listeningRepository = appContainer.listeningRepository,
-                        themePreferencesStore = appContainer.themePreferencesStore
+                        themePreferencesStore = appContainer.themePreferencesStore,
+                        onLibraryCleaned = { appContainer.widgetUpdater.requestUpdate() }
                     ) as T
                 }
             }

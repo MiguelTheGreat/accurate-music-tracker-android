@@ -197,13 +197,21 @@ class MediaSessionCoordinator(
     private val idlePauseTimeoutMs: Long = PlaySessionStateMachine.DEFAULT_IDLE_PAUSE_TIMEOUT_MS,
     private val artworkRepository: ArtworkRepository? = null,
     private val metadataNormalizer: MetadataNormalizer = MusicMetadataNormalizer(),
-    private val livenessCheckIntervalMs: Long = DEFAULT_LIVENESS_CHECK_INTERVAL_MS
+    private val livenessCheckIntervalMs: Long = DEFAULT_LIVENESS_CHECK_INTERVAL_MS,
+    private val onWidgetRefreshRequested: (() -> Unit)? = null
 ) {
 
     private data class AttachedEntry(
         val controller: TrackedMediaController,
         var cachedMetadata: MediaMetadataSnapshot?,
         var cachedState: PlaybackStateSnapshot?
+    )
+
+    private data class WidgetTrackingSignature(
+        val isActivelyPlaying: Boolean,
+        val normalizedTitle: String?,
+        val normalizedArtist: String?,
+        val sourcePackage: String?
     )
 
     private val stateLock = Any()
@@ -223,6 +231,8 @@ class MediaSessionCoordinator(
     private var allowedPackages: Set<String> = DefaultAllowlist.packages
     private val attachedControllers = LinkedHashMap<Any, AttachedEntry>()
     private var focusedTokenId: Any? = null
+    private var lastWidgetTrackingSignature: WidgetTrackingSignature =
+        playSessionEngine.nowTracking.value.toWidgetSignature()
 
     private var allowlistJob: Job? = null
     private var debounceJob: Job? = null
@@ -324,7 +334,9 @@ class MediaSessionCoordinator(
             lastKnownControllers = emptyList()
             focusedTokenId = null
 
-            playSessionEngine.flushActiveSession()
+            val flushed = playSessionEngine.flushActiveSession()
+            notifyWidgetIfTrackingChangedLocked()
+            flushed
         }
 
         return scope.launch(ioDispatcher) {
@@ -684,6 +696,35 @@ class MediaSessionCoordinator(
             livenessJob?.cancel()
             livenessJob = null
         }
+
+        notifyWidgetIfTrackingChangedLocked()
+    }
+
+    private fun notifyWidgetIfTrackingChangedLocked() {
+        val currentSignature = playSessionEngine.nowTracking.value.toWidgetSignature()
+        if (currentSignature != lastWidgetTrackingSignature) {
+            lastWidgetTrackingSignature = currentSignature
+            onWidgetRefreshRequested?.invoke()
+        }
+    }
+
+    private fun NowTrackingState?.toWidgetSignature(): WidgetTrackingSignature {
+        val isActive = this != null && isPlaying && !isDebouncing
+        return if (isActive) {
+            WidgetTrackingSignature(
+                isActivelyPlaying = true,
+                normalizedTitle = this!!.normalizedTitle,
+                normalizedArtist = this.normalizedArtist,
+                sourcePackage = this.sourcePackage
+            )
+        } else {
+            WidgetTrackingSignature(
+                isActivelyPlaying = false,
+                normalizedTitle = null,
+                normalizedArtist = null,
+                sourcePackage = null
+            )
+        }
     }
 
     private fun computeNextLivenessDelayMs(tracking: NowTrackingState): Long {
@@ -776,10 +817,12 @@ class MediaSessionCoordinator(
 
     private suspend fun persistSessions(sessions: List<CompletedListenSession>) {
         if (sessions.isEmpty()) return
+        var persistedAny = false
         persistenceMutex.withLock {
             for (session in sessions) {
                 try {
                     listeningRepository.recordCompletedSession(session)
+                    persistedAny = true
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (t: Throwable) {
@@ -788,6 +831,9 @@ class MediaSessionCoordinator(
                     }
                 }
             }
+        }
+        if (persistedAny) {
+            onWidgetRefreshRequested?.invoke()
         }
     }
 

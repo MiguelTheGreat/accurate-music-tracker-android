@@ -2,4 +2,6 @@
 <resources>
     <string name="app_name">Collecto</string>
     <string name="notification_listener_label">Collecto Session Listener</string>
+    <string name="widget_label">Collecto</string>
+    <string name="widget_description">Live Now Tracking session and your weekly #1 artist.</string>
 </resources>

@@ -30,6 +30,7 @@ import com.musictracker.app.domain.tracking.PlaySessionStateMachine
 import com.musictracker.app.tracking.AndroidSystemPermissionHelper
 import com.musictracker.app.tracking.MediaSessionCoordinator
 import com.musictracker.app.tracking.SystemPermissionHelper
+import com.musictracker.app.widget.CollectoWidgetUpdater
 import android.util.Log
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -127,6 +128,14 @@ class AppContainer(
         AndroidSystemPermissionHelper(appContext)
     }
 
+    val widgetUpdater: CollectoWidgetUpdater by lazy {
+        CollectoWidgetUpdater(
+            context = appContext,
+            scope = applicationScope,
+            ioDispatcher = ioDispatcher
+        )
+    }
+
     val mediaSessionCoordinator: MediaSessionCoordinator by lazy {
         MediaSessionCoordinator(
             playSessionEngine = playSessionEngine,
@@ -137,7 +146,8 @@ class AppContainer(
             ioDispatcher = ioDispatcher,
             schedulerDispatcher = schedulerDispatcher,
             artworkRepository = artworkRepository,
-            metadataNormalizer = metadataNormalizer
+            metadataNormalizer = metadataNormalizer,
+            onWidgetRefreshRequested = { widgetUpdater.requestUpdate() }
         )
     }
 
