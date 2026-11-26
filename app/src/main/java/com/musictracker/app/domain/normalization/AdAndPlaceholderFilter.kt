@@ -43,12 +43,7 @@ object AdAndPlaceholderFilter {
         "sponsored",
         "sponsored content",
         "sponsored audio",
-        "recommended for you",
-        "up next",
-        "loading",
-        "loading...",
-        "buffering",
-        "buffering..."
+        "recommended for you"
     )
 
     private val CONTEXTUAL_AD_TITLES: Set<String> = setOf(
@@ -60,7 +55,12 @@ object AdAndPlaceholderFilter {
         "youtube",
         "youtube music",
         "soundcloud",
-        "untitled"
+        "untitled",
+        "up next",
+        "loading",
+        "loading...",
+        "buffering",
+        "buffering..."
     )
 
     private val EXACT_AD_ALBUMS: Set<String> = setOf(
@@ -80,6 +80,9 @@ object AdAndPlaceholderFilter {
 
     private val WORD_BOUNDARY_AD_PHRASE_REGEX =
         Regex("\\b(?:advertisement|audio\\s+ad|sponsored)\\b", RegexOption.IGNORE_CASE)
+
+    private val CONTEXTUAL_AD_COUNT_REGEX =
+        Regex("\\bad\\s*(?:[·•|:-]\\s*)?\\d+\\s*(?:of|/)\\s*\\d+\\b", RegexOption.IGNORE_CASE)
 
     fun isAdOrPlaceholder(metadata: MediaMetadataSnapshot): Boolean =
         isAdOrPlaceholder(
@@ -116,7 +119,11 @@ object AdAndPlaceholderFilter {
             return true
         }
 
-        if (genericOrPlatformArtist && WORD_BOUNDARY_AD_PHRASE_REGEX.containsMatchIn(normalizedTitle)) {
+        if (
+            genericOrPlatformArtist &&
+            (WORD_BOUNDARY_AD_PHRASE_REGEX.containsMatchIn(normalizedTitle) ||
+                CONTEXTUAL_AD_COUNT_REGEX.containsMatchIn(normalizedTitle))
+        ) {
             return true
         }
 

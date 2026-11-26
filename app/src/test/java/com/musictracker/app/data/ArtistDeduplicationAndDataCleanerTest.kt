@@ -76,6 +76,39 @@ class ArtistDeduplicationAndDataCleanerTest {
         assertEquals("The Weeknd", unpacked.normalizedArtist)
         assertEquals("Starboy", unpacked.normalizedTitle)
         assertEquals("the weeknd::starboy", unpacked.dedupKey)
+
+        // When title has no "Artist - Title" separator, placeholder/platform artists must map to Unknown Artist.
+        val placeholderArtists = listOf(
+            "Recommended for you",
+            "Spotify",
+            "YouTube Music",
+            "YouTube",
+            "<unknown>",
+            "unknown",
+            "null",
+            "N/A",
+            "none",
+            "SoundCloud",
+            "Apple Music",
+            "TIDAL",
+            "Deezer",
+            "Amazon Music"
+        )
+        placeholderArtists.forEach { placeholder ->
+            val normalized = normalizer.normalize("Blinding Lights", placeholder)
+            assertEquals(
+                "Placeholder artist '$placeholder' must map to Unknown Artist",
+                "Unknown Artist",
+                normalized.normalizedArtist
+            )
+            assertEquals("unknown artist::blinding lights", normalized.dedupKey)
+        }
+
+        // Preserve "Various Artists" when title has no dash.
+        assertEquals(
+            "Various Artists",
+            normalizer.normalize("Ambient Interlude", "Various Artists").normalizedArtist
+        )
     }
 
     @Test

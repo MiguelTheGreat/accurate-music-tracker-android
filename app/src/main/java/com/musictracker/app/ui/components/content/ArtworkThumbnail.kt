@@ -30,6 +30,7 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.musictracker.app.ui.theme.LiquidGlassShapes
 import java.io.File
+import java.util.Locale
 
 private val ArtworkGradientPalettes: List<Pair<Color, Color>> = listOf(
     Color(0xFF1D4ED8) to Color(0xFF7C3AED),
@@ -123,7 +124,12 @@ fun ArtistAvatar(
 ) {
     val gradientColors = remember(artistName) { deterministicArtworkColors(artistName) }
     val monogram = remember(artistName) {
-        artistName.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?"
+        val trimmed = artistName.trim()
+        if (trimmed.isNotEmpty()) {
+            String(Character.toChars(trimmed.codePointAt(0))).uppercase(Locale.ROOT)
+        } else {
+            "?"
+        }
     }
     val context = LocalContext.current
     val sizePx = with(LocalDensity.current) { size.roundToPx().coerceAtLeast(1) }

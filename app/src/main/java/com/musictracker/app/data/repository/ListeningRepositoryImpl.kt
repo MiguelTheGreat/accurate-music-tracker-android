@@ -77,7 +77,7 @@ class ListeningRepositoryImpl(
                     trackId = trackId,
                     sourcePackage = session.sourcePackage,
                     startedAtEpoch = session.startedAtEpoch,
-                    endedAtEpoch = session.endedAtEpoch,
+                    endedAtEpoch = session.endedAtEpoch.coerceAtLeast(session.startedAtEpoch),
                     actualListenedMs = safeListenedMs,
                     completedRatio = safeRatio,
                     wasSkipped = session.wasSkipped

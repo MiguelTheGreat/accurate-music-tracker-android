@@ -22,7 +22,12 @@ class AdAndPlaceholderFilterTest {
             Triple("Advertisement · Spotify", "Spotify", ""),
             Triple("Sponsored Message", "", ""),
             Triple("Brand Promo", "Some Brand", "Advertisement"),
-            Triple("   ", "Some Artist", "")
+            Triple("   ", "Some Artist", ""),
+            Triple("Ad · 1 of 2", "YouTube Music", ""),
+            Triple("Ad 1 of 2", "Spotify", ""),
+            Triple("Ad 1/2", "", ""),
+            Triple("Loading", "", ""),
+            Triple("Up Next", "YouTube Music", "")
         )
 
         adCases.forEach { (title, artist, album) ->
@@ -42,7 +47,9 @@ class AdAndPlaceholderFilterTest {
             Triple("Sponsored by Destiny", "Real Artist", "Destiny"),
             Triple("Spotify Sessions", "Hozier", "Spotify Sessions"),
             Triple("Blinding Lights", "The Weeknd", "After Hours"),
-            Triple("Commercial", "Real Artist", "Real Album")
+            Triple("Commercial", "Real Artist", "Real Album"),
+            Triple("Loading", "Central Cee", "Wild West"),
+            Triple("Up Next", "Drake", "Album")
         )
 
         realSongs.forEach { (title, artist, album) ->

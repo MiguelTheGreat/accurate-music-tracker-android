@@ -24,7 +24,7 @@ class MusicMetadataNormalizer : MetadataNormalizer {
             }
         }
 
-        if (artist.isBlank()) {
+        if (artist.isBlank() || artist.lowercase(Locale.ROOT) in PLACEHOLDER_OR_PLATFORM_ARTISTS) {
             artist = CanonicalMetadataNormalizer.UNKNOWN_ARTIST
         }
 
@@ -109,6 +109,23 @@ class MusicMetadataNormalizer : MetadataNormalizer {
             "null",
             "n/a",
             "none"
+        )
+
+        private val PLACEHOLDER_OR_PLATFORM_ARTISTS: Set<String> = setOf(
+            "recommended for you",
+            "<unknown>",
+            "unknown",
+            "null",
+            "n/a",
+            "none",
+            "youtube",
+            "youtube music",
+            "spotify",
+            "soundcloud",
+            "apple music",
+            "tidal",
+            "deezer",
+            "amazon music"
         )
 
         fun collapseWhitespace(value: String): String =

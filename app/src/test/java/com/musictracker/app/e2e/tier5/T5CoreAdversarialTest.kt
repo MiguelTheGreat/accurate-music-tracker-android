@@ -326,13 +326,13 @@ class T5CoreAdversarialTest {
     fun t5_core05_recordCompletedSession_sanitizesNaNInfinityAndNegativeMetrics() = runBlocking {
         val env = newEnv()
 
-        val badSessions = listOf(
-            Triple(Float.NaN, -5_000L, "NaN Track"),
-            Triple(Float.POSITIVE_INFINITY, -1L, "Inf Track"),
-            Triple(-0.5f, 0L, "NegRatio Track")
+        // (a) Sessions with actualListenedMs <= 0L must be cleanly rejected (not inserted).
+        val zeroOrNegativeSessions = listOf(
+            Triple(Float.NaN, -5_000L, "Negative Duration Track"),
+            Triple(Float.POSITIVE_INFINITY, -1L, "Negative One Track"),
+            Triple(-0.5f, 0L, "Zero Duration Track")
         )
-
-        badSessions.forEachIndexed { idx, (ratio, listenedMs, title) ->
+        zeroOrNegativeSessions.forEachIndexed { idx, (ratio, listenedMs, title) ->
             val start = 1_750_000_000_000L + idx * 10_000L
             env.listeningRepository.recordCompletedSession(
                 CompletedListenSession(
@@ -350,13 +350,44 @@ class T5CoreAdversarialTest {
                 )
             )
         }
+        assertTrue(
+            "Sessions with actualListenedMs <= 0L must be rejected",
+            env.database.listenEventDao().getAll().isEmpty()
+        )
+
+        // (b) Positive-duration sessions with NaN / Infinity / negative completedRatio
+        //     (and endedAtEpoch < startedAtEpoch) must be persisted with sanitized metrics.
+        val badRatioSessions = listOf(
+            Triple(Float.NaN, 5_000L, "NaN Track"),
+            Triple(Float.POSITIVE_INFINITY, 10_000L, "Inf Track"),
+            Triple(-0.5f, 15_000L, "NegRatio Track")
+        )
+        badRatioSessions.forEachIndexed { idx, (ratio, listenedMs, title) ->
+            val start = 1_750_000_100_000L + idx * 10_000L
+            env.listeningRepository.recordCompletedSession(
+                CompletedListenSession(
+                    sourcePackage = "com.spotify.music",
+                    rawTitle = title,
+                    rawArtist = "Sanitize Artist",
+                    album = "",
+                    durationMs = 180_000L,
+                    artworkUri = null,
+                    startedAtEpoch = start,
+                    endedAtEpoch = if (idx == 0) start - 5_000L else start + listenedMs,
+                    actualListenedMs = listenedMs,
+                    completedRatio = ratio,
+                    wasSkipped = true
+                )
+            )
+        }
 
         val events = env.database.listenEventDao().getAll()
         assertEquals(3, events.size)
         events.forEach { event ->
-            assertEquals("actualListenedMs must be sanitized to 0L", 0L, event.actualListenedMs)
+            assertTrue("actualListenedMs must remain positive", event.actualListenedMs > 0L)
             assertTrue("completedRatio must be finite", event.completedRatio.isFinite())
             assertEquals("completedRatio must be sanitized to 0f", 0f, event.completedRatio)
+            assertTrue("endedAtEpoch must be >= startedAtEpoch", event.endedAtEpoch >= event.startedAtEpoch)
         }
 
         // Subsequent JSON export must succeed without JSONException on NaN/Infinity.

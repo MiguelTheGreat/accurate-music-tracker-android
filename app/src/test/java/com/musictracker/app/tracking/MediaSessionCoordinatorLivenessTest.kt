@@ -254,4 +254,71 @@ class MediaSessionCoordinatorLivenessTest {
 
         coordinator.flushAndStop().join()
     }
+
+    @Test
+    fun uninterruptedPlayback_survivesMultipleLivenessPollsAndRecordsFullDuration() = runTest {
+        val clock = FakeClock(elapsedMs = 10_000L)
+        val repo = RecordingListeningRepository()
+        val coordinator = createCoordinator(this, clock, repo, livenessIntervalMs = 60_000L)
+        coordinator.start()
+        runCurrent()
+
+        // Real Android MediaSession behavior: PLAYING state published once at t=0
+        // and never mutates positionMs or lastPositionUpdateTimeMs during uninterrupted playback.
+        val initialPlayingState = PlaybackStateSnapshot(
+            status = PlaybackStatus.PLAYING,
+            positionMs = 0L,
+            playbackSpeed = 1.0f,
+            lastPositionUpdateTimeMs = clock.elapsedMs
+        )
+        val controller = FakeController(
+            tokenId = "tok-1",
+            packageName = pkg,
+            currentMetadata = song, // durationMs = 230_000L
+            currentPlaybackState = initialPlayingState
+        )
+        coordinator.onActiveSessionsChanged(listOf(controller))
+        runCurrent()
+
+        // Pass 1.5s debounce -> becomes ACTIVE and schedules livenessJob.
+        clock.advanceBy(2_000L)
+        advanceTimeBy(2_000L)
+        runCurrent()
+        assertNotNull(coordinator.nowTracking.value)
+        assertTrue(coordinator.nowTracking.value!!.isPlaying)
+        assertFalse(coordinator.nowTracking.value!!.isDebouncing)
+        assertTrue(coordinator.isLivenessCheckScheduled)
+
+        // Survive 3 consecutive 60s livenessJob polls (at +62s, +122s, +182s) with unchanged state.
+        repeat(3) { pollIndex ->
+            clock.advanceBy(60_000L)
+            advanceTimeBy(60_000L)
+            runCurrent()
+            val live = coordinator.nowTracking.value
+            assertNotNull("Session must remain active after liveness poll #${pollIndex + 1}", live)
+            assertTrue("Session must remain playing after liveness poll #${pollIndex + 1}", live!!.isPlaying)
+            assertTrue("Liveness check must remain scheduled", coordinator.isLivenessCheckScheduled)
+        }
+
+        // Advance remaining 48s to reach full 230_000ms song duration and stop cleanly.
+        clock.advanceBy(48_000L)
+        advanceTimeBy(48_000L)
+        runCurrent()
+
+        val stoppedState = PlaybackStateSnapshot(
+            status = PlaybackStatus.STOPPED,
+            positionMs = 230_000L,
+            playbackSpeed = 0f,
+            lastPositionUpdateTimeMs = clock.elapsedMs
+        )
+        controller.currentPlaybackState = stoppedState
+        controller.listener?.onPlaybackStateChanged(stoppedState)
+        runCurrent()
+
+        assertEquals(1, repo.recorded.size)
+        assertEquals(230_000L, repo.recorded[0].actualListenedMs)
+        assertFalse(repo.recorded[0].wasSkipped)
+
+        coordinator.flushAndStop().join()
+    }
 }
