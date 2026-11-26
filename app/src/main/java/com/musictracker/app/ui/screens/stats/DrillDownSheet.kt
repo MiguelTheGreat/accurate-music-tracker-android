@@ -1,6 +1,7 @@
 package com.musictracker.app.ui.screens.stats
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -365,6 +366,7 @@ private fun ArtistDrillDownBody(
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
                     .background(colors.standardCardFill)
+                    .border(1.dp, colors.standardCardBorder, RoundedCornerShape(16.dp))
                     .padding(vertical = 4.dp)
             ) {
                 topTracks.forEachIndexed { idx, track ->
@@ -472,6 +474,7 @@ private fun DrillDownMetricTile(
         modifier = modifier
             .clip(RoundedCornerShape(14.dp))
             .background(colors.standardCardFill)
+            .border(1.dp, colors.standardCardBorder, RoundedCornerShape(14.dp))
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
@@ -505,6 +508,7 @@ private fun HeardDatesRow(
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
             .background(colors.standardCardFill)
+            .border(1.dp, colors.standardCardBorder, RoundedCornerShape(14.dp))
             .padding(horizontal = 14.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {

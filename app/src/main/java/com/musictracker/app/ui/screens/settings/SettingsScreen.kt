@@ -49,10 +49,12 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.musictracker.app.data.preferences.ThemeMode
 import com.musictracker.app.tracking.SystemPermissionHelper
 import com.musictracker.app.ui.components.content.StandardMaterialCard
 import com.musictracker.app.ui.components.glass.LiquidGlassBanner
 import com.musictracker.app.ui.components.glass.LiquidGlassButton
+import com.musictracker.app.ui.components.glass.LiquidGlassSegmentedControl
 import com.musictracker.app.ui.components.glass.LiquidGlassSwitch
 import com.musictracker.app.ui.components.glass.LiquidGlassVariant
 import com.musictracker.app.ui.navigation.TestTags
@@ -139,6 +141,7 @@ fun SettingsRoute(
         onToggleReduceTransparency = viewModel::onToggleReduceTransparency,
         onToggleOnlineArtwork = viewModel::onToggleOnlineArtwork,
         onCleanLibraryClick = viewModel::cleanAndRenormalizeLibrary,
+        onSelectThemeMode = viewModel::onSelectThemeMode,
         modifier = modifier
     )
 }
@@ -156,7 +159,8 @@ fun SettingsScreenContent(
     onToggleReduceTransparency: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
     onToggleOnlineArtwork: (Boolean) -> Unit = {},
-    onCleanLibraryClick: () -> Unit = {}
+    onCleanLibraryClick: () -> Unit = {},
+    onSelectThemeMode: (ThemeMode) -> Unit = {}
 ) {
     val colors = LiquidGlassTheme.colors
     val accessibility = LiquidGlassTheme.accessibility
@@ -381,7 +385,48 @@ fun SettingsScreenContent(
             }
         }
 
-        // Section 3: Accessibility
+        // Section 3: Appearance
+        item(key = "settings_appearance_section") {
+            SettingsSectionTitle(text = "Appearance")
+            Spacer(modifier = Modifier.height(8.dp))
+            StandardMaterialCard(
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(16.dp)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = "Theme Mode",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = colors.labelPrimary
+                        )
+                        Text(
+                            text = "Follow your system theme or force Light or Dark Liquid Glass.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.labelSecondary
+                        )
+                    }
+                    LiquidGlassSegmentedControl(
+                        options = listOf(ThemeMode.SYSTEM, ThemeMode.LIGHT, ThemeMode.DARK),
+                        selectedOption = uiState.themeMode,
+                        onOptionSelected = onSelectThemeMode,
+                        labelProvider = { mode ->
+                            when (mode) {
+                                ThemeMode.SYSTEM -> "System"
+                                ThemeMode.LIGHT -> "Light"
+                                ThemeMode.DARK -> "Dark"
+                            }
+                        },
+                        testTagProvider = TestTags::settingsThemeMode,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag(TestTags.SETTINGS_THEME_CONTROL)
+                    )
+                }
+            }
+        }
+
+        // Section 4: Accessibility
         item(key = "settings_accessibility_section") {
             SettingsSectionTitle(text = "Accessibility")
             Spacer(modifier = Modifier.height(8.dp))

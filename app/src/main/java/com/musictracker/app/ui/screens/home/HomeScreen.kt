@@ -496,24 +496,30 @@ private fun NowTrackingGlassCard(
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
+                            val isLightReducedTransparency = accessibility.reduceTransparency && !colors.isDark
                             // Solid tinted source app pill (strictly NOT nested Liquid Glass)
                             Box(
                                 modifier = Modifier
                                     .clip(LiquidGlassShapes.Capsule)
-                                    .background(Color.Black.copy(alpha = 0.34f))
+                                    .background(
+                                        if (isLightReducedTransparency) {
+                                            colors.controlTrackFill
+                                        } else {
+                                            Color.Black.copy(alpha = 0.34f)
+                                        }
+                                    )
                                     .padding(horizontal = 8.dp, vertical = 3.dp)
                             ) {
                                 Text(
                                     text = sourceAppName,
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = Color.White,
+                                    color = if (isLightReducedTransparency) colors.labelPrimary else Color.White,
                                     maxLines = 1
                                 )
                             }
 
                             // Solid Play/Pause status pill
                             val statusColor = if (nowTracking.isPlaying) colors.accentGreen else colors.accentAmber
-                            val isLightReducedTransparency = accessibility.reduceTransparency && !colors.isDark
                             val statusPillBackground = if (isLightReducedTransparency) {
                                 statusColor.copy(alpha = 0.16f)
                             } else {

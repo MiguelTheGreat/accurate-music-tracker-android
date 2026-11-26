@@ -110,7 +110,7 @@ fun <T> LiquidGlassSegmentedControl(
 
         // Sliding Temporary Lift thumb
         val thumbFill = when {
-            isLifted -> Color.White.copy(alpha = 0.28f)
+            isLifted -> if (colors.isDark) Color.White.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.72f)
             colors.isDark -> colors.standardCardElevatedFill
             else -> colors.controlThumbSolid
         }

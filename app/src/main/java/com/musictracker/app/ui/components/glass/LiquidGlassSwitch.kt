@@ -99,7 +99,11 @@ fun LiquidGlassSwitch(
             .padding(3.dp),
         contentAlignment = Alignment.CenterStart
     ) {
-        val thumbFill = if (isLifted) Color.White.copy(alpha = 0.28f) else colors.controlThumbSolid
+        val thumbFill = if (isLifted) {
+            if (colors.isDark) Color.White.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.68f)
+        } else {
+            colors.controlThumbSolid
+        }
         val thumbRim = if (isLifted) {
             Brush.verticalGradient(listOf(colors.specularTopHighlight, colors.specularBottomHighlight))
         } else {

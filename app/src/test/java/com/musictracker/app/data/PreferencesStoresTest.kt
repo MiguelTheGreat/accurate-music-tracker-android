@@ -1,10 +1,14 @@
 package com.musictracker.app.data
 
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.edit
 import app.cash.turbine.test
 import com.musictracker.app.data.preferences.AccessibilityPreferencesStore
 import com.musictracker.app.data.preferences.AllowlistStore
+import com.musictracker.app.data.preferences.ArtworkPreferencesStore
 import com.musictracker.app.data.preferences.DefaultAllowlist
+import com.musictracker.app.data.preferences.ThemeMode
+import com.musictracker.app.data.preferences.ThemePreferencesStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -147,5 +151,89 @@ class PreferencesStoresTest {
 
         store2.setReduceTransparencyEnabled(false)
         assertFalse(store2.reduceTransparencyEnabled.first())
+    }
+
+    @Test
+    fun themePreferencesStore_defaultsToSystemAndPersistsLightAndDarkAcrossInstances() = runTest {
+        val file = newPrefsFile()
+
+        val scope1 = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val dataStore1 = PreferenceDataStoreFactory.create(
+            scope = scope1,
+            produceFile = { file }
+        )
+        val store1 = ThemePreferencesStore(dataStore1)
+        assertEquals(ThemeMode.SYSTEM, store1.themeMode.first())
+
+        store1.setThemeMode(ThemeMode.LIGHT)
+        assertEquals(ThemeMode.LIGHT, store1.themeMode.first())
+        scope1.cancel()
+        scope1.coroutineContext[Job]?.join()
+
+        // Reopen file to confirm LIGHT persists, then switch to DARK and SYSTEM
+        val dataStore2 = PreferenceDataStoreFactory.create(
+            scope = backgroundScope,
+            produceFile = { file }
+        )
+        val store2 = ThemePreferencesStore(dataStore2)
+        assertEquals(ThemeMode.LIGHT, store2.themeMode.first())
+
+        store2.themeMode.test {
+            assertEquals(ThemeMode.LIGHT, awaitItem())
+
+            store2.setThemeMode(ThemeMode.DARK)
+            assertEquals(ThemeMode.DARK, awaitItem())
+
+            store2.setThemeMode(ThemeMode.SYSTEM)
+            assertEquals(ThemeMode.SYSTEM, awaitItem())
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun themePreferencesStore_unknownStoredValueFallsBackToSystem() = runTest {
+        val dataStore = PreferenceDataStoreFactory.create(
+            scope = backgroundScope,
+            produceFile = { newPrefsFile() }
+        )
+        dataStore.edit { prefs ->
+            prefs[ThemePreferencesStore.KEY_THEME_MODE] = "sepia_unknown"
+        }
+
+        val store = ThemePreferencesStore(dataStore)
+        assertEquals(ThemeMode.SYSTEM, store.themeMode.first())
+        assertEquals(ThemeMode.SYSTEM, ThemeMode.fromStorageValue(null))
+        assertEquals(ThemeMode.SYSTEM, ThemeMode.fromStorageValue("invalid"))
+        assertEquals(ThemeMode.LIGHT, ThemeMode.fromStorageValue("LIGHT"))
+        assertEquals(ThemeMode.DARK, ThemeMode.fromStorageValue("dark"))
+    }
+
+    @Test
+    fun artworkPreferencesStore_defaultsToTrueAndPersistsToggle() = runTest {
+        val file = newPrefsFile()
+
+        val scope1 = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val dataStore1 = PreferenceDataStoreFactory.create(
+            scope = scope1,
+            produceFile = { file }
+        )
+        val store1 = ArtworkPreferencesStore(dataStore1)
+        assertTrue(store1.onlineArtworkEnabled.first())
+
+        store1.setOnlineArtworkEnabled(false)
+        assertFalse(store1.onlineArtworkEnabled.first())
+        scope1.cancel()
+        scope1.coroutineContext[Job]?.join()
+
+        val dataStore2 = PreferenceDataStoreFactory.create(
+            scope = backgroundScope,
+            produceFile = { file }
+        )
+        val store2 = ArtworkPreferencesStore(dataStore2)
+        assertFalse(store2.onlineArtworkEnabled.first())
+
+        store2.setOnlineArtworkEnabled(true)
+        assertTrue(store2.onlineArtworkEnabled.first())
     }
 }

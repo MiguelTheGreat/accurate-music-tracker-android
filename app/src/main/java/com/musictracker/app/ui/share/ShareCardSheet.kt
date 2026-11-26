@@ -453,7 +453,7 @@ private fun ShareOptionPill(
 ) {
     val colors = LiquidGlassTheme.colors
     val bgColor = if (selected) colors.accentBlue else colors.controlTrackFill
-    val textColor = if (selected) Color.White else colors.labelSecondary
+    val textColor = if (selected) colors.onProminent else colors.labelSecondary
 
     Box(
         modifier = modifier

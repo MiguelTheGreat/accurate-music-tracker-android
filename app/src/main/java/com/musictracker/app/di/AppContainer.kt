@@ -19,6 +19,7 @@ import com.musictracker.app.data.preferences.AccessibilityPreferencesStore
 import com.musictracker.app.data.preferences.AllowlistRepository
 import com.musictracker.app.data.preferences.AllowlistStore
 import com.musictracker.app.data.preferences.ArtworkPreferencesStore
+import com.musictracker.app.data.preferences.ThemePreferencesStore
 import com.musictracker.app.data.repository.ListeningRepository
 import com.musictracker.app.data.repository.ListeningRepositoryImpl
 import com.musictracker.app.domain.clock.TrackerClock
@@ -86,6 +87,10 @@ class AppContainer(
 
     val artworkPreferencesStore: ArtworkPreferencesStore by lazy {
         ArtworkPreferencesStore(dataStore = preferencesDataStore)
+    }
+
+    val themePreferencesStore: ThemePreferencesStore by lazy {
+        ThemePreferencesStore(dataStore = preferencesDataStore)
     }
 
     val artworkHttpClient: ArtworkHttpClient by lazy {

@@ -7,6 +7,8 @@ import com.musictracker.app.data.export.DataExporter
 import com.musictracker.app.data.preferences.AccessibilityPreferencesStore
 import com.musictracker.app.data.preferences.AllowlistRepository
 import com.musictracker.app.data.preferences.ArtworkPreferencesStore
+import com.musictracker.app.data.preferences.ThemeMode
+import com.musictracker.app.data.preferences.ThemePreferencesStore
 import com.musictracker.app.data.repository.ListeningRepository
 import com.musictracker.app.di.AppContainer
 import com.musictracker.app.domain.model.ExportResult
@@ -36,7 +38,9 @@ class SettingsViewModel(
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val onlineArtworkEnabledFlow: Flow<Boolean> = flowOf(true),
     private val setOnlineArtworkEnabled: suspend (Boolean) -> Unit = {},
-    private val runLibraryCleanup: suspend () -> LibraryCleanupResult = { LibraryCleanupResult() }
+    private val runLibraryCleanup: suspend () -> LibraryCleanupResult = { LibraryCleanupResult() },
+    private val themeModeFlow: Flow<ThemeMode> = flowOf(ThemeMode.SYSTEM),
+    private val setThemeMode: suspend (ThemeMode) -> Unit = {}
 ) : ViewModel() {
 
     constructor(
@@ -46,7 +50,8 @@ class SettingsViewModel(
         dataExporter: DataExporter,
         ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
         artworkPreferencesStore: ArtworkPreferencesStore? = null,
-        listeningRepository: ListeningRepository? = null
+        listeningRepository: ListeningRepository? = null,
+        themePreferencesStore: ThemePreferencesStore? = null
     ) : this(
         systemPermissionHelper = systemPermissionHelper,
         allowlistRepository = allowlistRepository,
@@ -62,6 +67,10 @@ class SettingsViewModel(
         },
         runLibraryCleanup = {
             listeningRepository?.cleanAndRenormalizeLibrary() ?: LibraryCleanupResult()
+        },
+        themeModeFlow = themePreferencesStore?.themeMode ?: flowOf(ThemeMode.SYSTEM),
+        setThemeMode = { mode ->
+            themePreferencesStore?.setThemeMode(mode)
         }
     )
 
@@ -116,7 +125,8 @@ class SettingsViewModel(
         val reduceTransparency: Boolean,
         val onlineArtworkEnabled: Boolean,
         val isCleaningLibrary: Boolean,
-        val libraryCleanupFeedback: String?
+        val libraryCleanupFeedback: String?,
+        val themeMode: ThemeMode
     )
 
     private val systemStatusFlow = combine(
@@ -131,13 +141,15 @@ class SettingsViewModel(
         reduceTransparencyFlow,
         onlineArtworkEnabledFlow,
         isCleaningLibraryFlow,
-        libraryCleanupFeedbackFlow
-    ) { reduceTransparency, onlineArtwork, isCleaningLibrary, cleanupFeedback ->
+        libraryCleanupFeedbackFlow,
+        themeModeFlow
+    ) { reduceTransparency, onlineArtwork, isCleaningLibrary, cleanupFeedback, themeMode ->
         PreferenceTogglesSnapshot(
             reduceTransparency = reduceTransparency,
             onlineArtworkEnabled = onlineArtwork,
             isCleaningLibrary = isCleaningLibrary,
-            libraryCleanupFeedback = cleanupFeedback
+            libraryCleanupFeedback = cleanupFeedback,
+            themeMode = themeMode
         )
     }
 
@@ -158,7 +170,8 @@ class SettingsViewModel(
             reduceTransparencyEnabled = toggles.reduceTransparency,
             onlineArtworkEnabled = toggles.onlineArtworkEnabled,
             isCleaningLibrary = toggles.isCleaningLibrary,
-            libraryCleanupFeedback = toggles.libraryCleanupFeedback
+            libraryCleanupFeedback = toggles.libraryCleanupFeedback,
+            themeMode = toggles.themeMode
         )
     }.stateIn(
         scope = viewModelScope,
@@ -210,6 +223,12 @@ class SettingsViewModel(
     fun onToggleOnlineArtwork(enabled: Boolean) {
         viewModelScope.launch {
             setOnlineArtworkEnabled(enabled)
+        }
+    }
+
+    fun onSelectThemeMode(mode: ThemeMode) {
+        viewModelScope.launch {
+            setThemeMode(mode)
         }
     }
 
@@ -332,7 +351,8 @@ class SettingsViewModel(
                         dataExporter = appContainer.dataExporter,
                         ioDispatcher = appContainer.ioDispatcher,
                         artworkPreferencesStore = appContainer.artworkPreferencesStore,
-                        listeningRepository = appContainer.listeningRepository
+                        listeningRepository = appContainer.listeningRepository,
+                        themePreferencesStore = appContainer.themePreferencesStore
                     ) as T
                 }
             }

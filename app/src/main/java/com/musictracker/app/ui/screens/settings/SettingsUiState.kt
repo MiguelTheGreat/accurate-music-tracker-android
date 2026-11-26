@@ -1,6 +1,7 @@
 package com.musictracker.app.ui.screens.settings
 
 import androidx.compose.runtime.Immutable
+import com.musictracker.app.data.preferences.ThemeMode
 
 @Immutable
 data class AllowlistAppItem(
@@ -34,7 +35,8 @@ data class SettingsUiState(
     val reduceTransparencyEnabled: Boolean = false,
     val onlineArtworkEnabled: Boolean = true,
     val isCleaningLibrary: Boolean = false,
-    val libraryCleanupFeedback: String? = null
+    val libraryCleanupFeedback: String? = null,
+    val themeMode: ThemeMode = ThemeMode.SYSTEM
 ) {
     val isExporting: Boolean
         get() = exportState is ExportUiState.InProgress

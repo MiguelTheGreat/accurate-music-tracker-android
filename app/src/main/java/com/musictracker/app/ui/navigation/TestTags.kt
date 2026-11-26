@@ -1,5 +1,6 @@
 package com.musictracker.app.ui.navigation
 
+import com.musictracker.app.data.preferences.ThemeMode
 import com.musictracker.app.domain.model.StatsTimeframe
 
 /**
@@ -55,4 +56,14 @@ object TestTags {
     const val SETTINGS_EXPORT_FEEDBACK = "SETTINGS_EXPORT_FEEDBACK"
     const val SETTINGS_CLEAN_LIBRARY_BTN = "SETTINGS_CLEAN_LIBRARY_BTN"
     const val SETTINGS_CLEAN_LIBRARY_FEEDBACK = "SETTINGS_CLEAN_LIBRARY_FEEDBACK"
+    const val SETTINGS_THEME_CONTROL = "SETTINGS_THEME_CONTROL"
+    const val SETTINGS_THEME_SYSTEM = "SETTINGS_THEME_SYSTEM"
+    const val SETTINGS_THEME_LIGHT = "SETTINGS_THEME_LIGHT"
+    const val SETTINGS_THEME_DARK = "SETTINGS_THEME_DARK"
+
+    fun settingsThemeMode(mode: ThemeMode): String = when (mode) {
+        ThemeMode.SYSTEM -> SETTINGS_THEME_SYSTEM
+        ThemeMode.LIGHT -> SETTINGS_THEME_LIGHT
+        ThemeMode.DARK -> SETTINGS_THEME_DARK
+    }
 }
