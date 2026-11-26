@@ -31,6 +31,7 @@ class HomeViewModel(
         systemPermissionHelper.isNotificationAccessGranted()
     )
     private val isBannerDismissedFlow = MutableStateFlow(false)
+    private val isFullHistoryUnlockedFlow = MutableStateFlow(false)
     private val todayStartEpochMsFlow = MutableStateFlow(
         startOfTodayEpochMs(clock.currentTimeMillis(), zoneId)
     )
@@ -39,19 +40,36 @@ class HomeViewModel(
         listeningRepository.observeSummary(sinceEpochMs)
     }
 
+    private val recentHistoryFlow = isFullHistoryUnlockedFlow.flatMapLatest { unlocked ->
+        val queryLimit = if (unlocked) FULL_HISTORY_LIMIT else INITIAL_RECENT_HISTORY_LIMIT + 1
+        listeningRepository.observeRecentHistory(limit = queryLimit)
+    }
+
+    private val historyStateFlow = combine(
+        recentHistoryFlow,
+        isFullHistoryUnlockedFlow
+    ) { items, unlocked ->
+        val hasMore = !unlocked && items.size > INITIAL_RECENT_HISTORY_LIMIT
+        val visibleItems = if (unlocked) items else items.take(INITIAL_RECENT_HISTORY_LIMIT)
+        Triple(visibleItems, unlocked, hasMore)
+    }
+
     val uiState: StateFlow<HomeUiState> = combine(
         playSessionEngine.nowTracking,
         todaySummaryFlow,
-        listeningRepository.observeRecentHistory(limit = RECENT_HISTORY_LIMIT),
+        historyStateFlow,
         isNotificationAccessGrantedFlow,
         isBannerDismissedFlow
-    ) { nowTracking, todaySummary, recentHistory, hasNotifAccess, isDismissed ->
+    ) { nowTracking, todaySummary, historyState, hasNotifAccess, isDismissed ->
+        val (visibleHistory, unlocked, hasMore) = historyState
         HomeUiState(
             isNotificationAccessGranted = hasNotifAccess,
             isPermissionBannerDismissed = isDismissed,
             nowTracking = nowTracking,
             todaySummary = todaySummary,
-            recentHistory = recentHistory,
+            recentHistory = visibleHistory,
+            isFullHistoryUnlocked = unlocked,
+            hasMoreHistory = hasMore,
             isLoading = false
         )
     }.stateIn(
@@ -76,8 +94,17 @@ class HomeViewModel(
         isBannerDismissedFlow.value = true
     }
 
+    fun unlockFullHistory() {
+        isFullHistoryUnlockedFlow.value = true
+    }
+
+    fun collapseHistory() {
+        isFullHistoryUnlockedFlow.value = false
+    }
+
     companion object {
-        private const val RECENT_HISTORY_LIMIT = 50
+        private const val INITIAL_RECENT_HISTORY_LIMIT = 10
+        private const val FULL_HISTORY_LIMIT = 500
 
         fun factory(appContainer: AppContainer): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {

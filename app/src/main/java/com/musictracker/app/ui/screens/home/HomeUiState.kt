@@ -12,6 +12,8 @@ data class HomeUiState(
     val nowTracking: NowTrackingState? = null,
     val todaySummary: ListeningSummary = ListeningSummary(),
     val recentHistory: List<RecentListenItem> = emptyList(),
+    val isFullHistoryUnlocked: Boolean = false,
+    val hasMoreHistory: Boolean = false,
     val isLoading: Boolean = true
 ) {
     val showPermissionBanner: Boolean

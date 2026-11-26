@@ -1,7 +1,9 @@
 package com.musictracker.app.ui.screens.home
 
 import android.os.Build
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -23,6 +26,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Headphones
+import androidx.compose.material.icons.rounded.KeyboardDoubleArrowDown
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.Icon
@@ -32,6 +36,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -39,13 +44,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -77,6 +90,7 @@ import com.musictracker.app.ui.theme.LiquidGlassTheme
 import com.musictracker.app.ui.theme.withTabularNumerals
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlin.math.roundToInt
 
 @Composable
 fun HomeRoute(
@@ -99,6 +113,8 @@ fun HomeRoute(
             systemPermissionHelper.openNotificationListenerSettings(context)
         },
         onDismissPermissionBanner = viewModel::dismissPermissionBanner,
+        onUnlockFullHistory = viewModel::unlockFullHistory,
+        onCollapseHistory = viewModel::collapseHistory,
         modifier = modifier
     )
 }
@@ -109,17 +125,63 @@ fun HomeScreenContent(
     clock: TrackerClock,
     onEnableNotificationAccess: () -> Unit,
     onDismissPermissionBanner: () -> Unit,
+    onUnlockFullHistory: () -> Unit = {},
+    onCollapseHistory: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val colors = LiquidGlassTheme.colors
     val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val nowEpochMs = clock.currentTimeMillis()
+    val density = LocalDensity.current
+    val haptic = LocalHapticFeedback.current
+
+    val unlockThresholdPx = remember(density) { with(density) { 420.dp.toPx() } }
+    var unlockDragPx by remember { mutableFloatStateOf(0f) }
+
+    val canUnlockMore = !uiState.isFullHistoryUnlocked && uiState.hasMoreHistory
+    val unlockProgress = if (canUnlockMore && unlockThresholdPx > 0f) {
+        (unlockDragPx / unlockThresholdPx).coerceIn(0f, 1f)
+    } else {
+        0f
+    }
+
+    val unlockScrollConnection = remember(canUnlockMore, unlockThresholdPx) {
+        object : NestedScrollConnection {
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource
+            ): Offset {
+                if (!canUnlockMore) return Offset.Zero
+                if (available.y < 0f && source == NestedScrollSource.UserInput) {
+                    val next = (unlockDragPx + (-available.y)).coerceAtMost(unlockThresholdPx)
+                    unlockDragPx = next
+                    if (next >= unlockThresholdPx) {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        unlockDragPx = 0f
+                        onUnlockFullHistory()
+                    }
+                } else if (consumed.y > 0f && unlockDragPx > 0f) {
+                    unlockDragPx = (unlockDragPx - consumed.y * 1.5f).coerceAtLeast(0f)
+                }
+                return Offset.Zero
+            }
+
+            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+                if (canUnlockMore && unlockDragPx > 0f) {
+                    unlockDragPx = if (unlockDragPx < 24f) 0f else unlockDragPx * 0.65f
+                }
+                return Velocity.Zero
+            }
+        }
+    }
 
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
             .background(colors.contentBackground)
+            .nestedScroll(unlockScrollConnection)
             .testTag(TestTags.HOME_RECENT_LIST),
         contentPadding = PaddingValues(
             start = 16.dp,
@@ -169,7 +231,30 @@ fun HomeScreenContent(
         }
 
         item(key = "home_recent_header") {
-            SectionTitle(text = "Recent Listening")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                SectionTitle(
+                    text = if (uiState.isFullHistoryUnlocked) {
+                        "Full Listening History"
+                    } else {
+                        "Recent Listening"
+                    }
+                )
+                if (uiState.isFullHistoryUnlocked) {
+                    Text(
+                        text = "Show top 10",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.accentBlue,
+                        modifier = Modifier
+                            .clip(LiquidGlassShapes.Capsule)
+                            .clickable(onClick = onCollapseHistory)
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                    )
+                }
+            }
         }
 
         if (uiState.recentHistory.isEmpty()) {
@@ -188,6 +273,71 @@ fun HomeScreenContent(
                     item = item,
                     nowEpochMs = nowEpochMs,
                     modifier = Modifier.testTag(TestTags.homeRecentItem(item.eventId))
+                )
+            }
+
+            if (canUnlockMore) {
+                item(key = "home_recent_unlock_footer") {
+                    UnlockFullHistoryFooter(progress = unlockProgress)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun UnlockFullHistoryFooter(
+    progress: Float,
+    modifier: Modifier = Modifier
+) {
+    val colors = LiquidGlassTheme.colors
+    val animatedProgress by animateFloatAsState(
+        targetValue = progress.coerceIn(0f, 1f),
+        label = "unlock_history_progress"
+    )
+    val percent = (animatedProgress * 100f).roundToInt()
+
+    StandardMaterialCard(
+        modifier = modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.KeyboardDoubleArrowDown,
+                contentDescription = null,
+                tint = if (animatedProgress > 0.05f) colors.accentBlue else colors.labelTertiary,
+                modifier = Modifier.size(20.dp)
+            )
+            Text(
+                text = when {
+                    percent >= 75 -> "Almost there… ($percent%)"
+                    percent > 5 -> "Keep scrolling down to unlock ($percent%)"
+                    else -> "Keep scrolling down to unlock full history"
+                },
+                style = MaterialTheme.typography.labelMedium,
+                color = if (percent > 5) colors.labelPrimary else colors.labelSecondary
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(6.dp)
+                    .clip(CircleShape)
+                    .background(colors.controlTrackFill)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(animatedProgress.coerceAtLeast(0.02f))
+                        .fillMaxHeight()
+                        .clip(CircleShape)
+                        .background(
+                            Brush.horizontalGradient(
+                                listOf(colors.accentBlue, colors.accentGreen)
+                            )
+                        )
                 )
             }
         }

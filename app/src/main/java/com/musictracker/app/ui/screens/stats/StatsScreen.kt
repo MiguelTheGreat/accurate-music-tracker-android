@@ -1,7 +1,10 @@
 package com.musictracker.app.ui.screens.stats
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +23,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -27,6 +32,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -55,6 +61,7 @@ import com.musictracker.app.ui.theme.LiquidGlassMotion
 import com.musictracker.app.ui.theme.LiquidGlassShapes
 import com.musictracker.app.ui.theme.LiquidGlassTheme
 import com.musictracker.app.ui.theme.withTabularNumerals
+import kotlinx.coroutines.launch
 
 @Composable
 fun StatsRoute(
@@ -83,6 +90,8 @@ fun StatsScreenContent(
     val colors = LiquidGlassTheme.colors
     val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val pagerState = rememberPagerState(pageCount = { 2 })
+    val coroutineScope = rememberCoroutineScope()
 
     val timeframeOptions = remember {
         listOf(
@@ -92,6 +101,9 @@ fun StatsScreenContent(
             StatsTimeframe.ALL_TIME
         )
     }
+
+    val topFiveTracks = remember(uiState.topTracks) { uiState.topTracks.take(5) }
+    val topFiveArtists = remember(uiState.topArtists) { uiState.topArtists.take(5) }
 
     LazyColumn(
         modifier = modifier
@@ -128,7 +140,7 @@ fun StatsScreenContent(
             StatsOverviewStrip(summary = uiState.summary)
         }
 
-        val isEmpty = !uiState.isLoading && uiState.topTracks.isEmpty() && uiState.topArtists.isEmpty()
+        val isEmpty = !uiState.isLoading && topFiveTracks.isEmpty() && topFiveArtists.isEmpty()
         if (isEmpty) {
             item(key = "stats_empty") {
                 EmptyStateView(
@@ -137,33 +149,118 @@ fun StatsScreenContent(
                 )
             }
         } else {
-            if (uiState.topTracks.isNotEmpty()) {
-                item(key = "stats_top_tracks_section") {
-                    Text(
-                        text = "Top Tracks",
-                        style = MaterialTheme.typography.titleLarge,
-                        color = colors.labelPrimary
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    TopTracksCard(
-                        tracks = uiState.topTracks,
-                        modifier = Modifier.testTag(TestTags.STATS_TOP_TRACKS_LIST)
-                    )
-                }
-            }
+            item(key = "stats_ranked_pager") {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            val tracksColor by animateColorAsState(
+                                targetValue = if (pagerState.currentPage == 0) colors.labelPrimary else colors.labelTertiary,
+                                label = "stats_tab_tracks_color"
+                            )
+                            val artistsColor by animateColorAsState(
+                                targetValue = if (pagerState.currentPage == 1) colors.labelPrimary else colors.labelTertiary,
+                                label = "stats_tab_artists_color"
+                            )
+                            Text(
+                                text = "Top 5 Tracks",
+                                style = MaterialTheme.typography.titleLarge,
+                                color = tracksColor,
+                                modifier = Modifier
+                                    .clip(LiquidGlassShapes.Capsule)
+                                    .clickable {
+                                        coroutineScope.launch { pagerState.animateScrollToPage(0) }
+                                    }
+                                    .padding(vertical = 2.dp)
+                            )
+                            Text(
+                                text = "Top 5 Artists",
+                                style = MaterialTheme.typography.titleLarge,
+                                color = artistsColor,
+                                modifier = Modifier
+                                    .clip(LiquidGlassShapes.Capsule)
+                                    .clickable {
+                                        coroutineScope.launch { pagerState.animateScrollToPage(1) }
+                                    }
+                                    .padding(vertical = 2.dp)
+                            )
+                        }
 
-            if (uiState.topArtists.isNotEmpty()) {
-                item(key = "stats_top_artists_section") {
+                        // Page indicator dots
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            repeat(2) { page ->
+                                val isCurrent = pagerState.currentPage == page
+                                val dotWidth by animateDpAsState(
+                                    targetValue = if (isCurrent) 18.dp else 6.dp,
+                                    label = "stats_dot_width_$page"
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .height(6.dp)
+                                        .width(dotWidth)
+                                        .clip(CircleShape)
+                                        .background(
+                                            if (isCurrent) colors.accentBlue else colors.labelTertiary.copy(alpha = 0.4f)
+                                        )
+                                )
+                            }
+                        }
+                    }
+
                     Text(
-                        text = "Top Artists",
-                        style = MaterialTheme.typography.titleLarge,
-                        color = colors.labelPrimary
+                        text = if (pagerState.currentPage == 0) {
+                            "Swipe for Top 5 Artists"
+                        } else {
+                            "Swipe back for Top 5 Tracks"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.labelTertiary
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    TopArtistsCard(
-                        artists = uiState.topArtists,
-                        modifier = Modifier.testTag(TestTags.STATS_TOP_ARTISTS_LIST)
-                    )
+
+                    HorizontalPager(
+                        state = pagerState,
+                        pageSpacing = 12.dp,
+                        verticalAlignment = Alignment.Top,
+                        modifier = Modifier.fillMaxWidth()
+                    ) { page ->
+                        when (page) {
+                            0 -> {
+                                if (topFiveTracks.isNotEmpty()) {
+                                    TopTracksCard(
+                                        tracks = topFiveTracks,
+                                        modifier = Modifier.testTag(TestTags.STATS_TOP_TRACKS_LIST)
+                                    )
+                                } else {
+                                    EmptyStateView(
+                                        title = "No Top Tracks Yet",
+                                        subtitle = "Keep listening to populate your Top 5 Tracks."
+                                    )
+                                }
+                            }
+                            else -> {
+                                if (topFiveArtists.isNotEmpty()) {
+                                    TopArtistsCard(
+                                        artists = topFiveArtists,
+                                        modifier = Modifier.testTag(TestTags.STATS_TOP_ARTISTS_LIST)
+                                    )
+                                } else {
+                                    EmptyStateView(
+                                        title = "No Top Artists Yet",
+                                        subtitle = "Keep listening to populate your Top 5 Artists."
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

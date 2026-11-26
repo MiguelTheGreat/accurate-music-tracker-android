@@ -66,7 +66,7 @@ class StatsViewModel(
     }
 
     companion object {
-        private const val TOP_LIST_LIMIT = 25
+        private const val TOP_LIST_LIMIT = 5
 
         fun factory(appContainer: AppContainer): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
