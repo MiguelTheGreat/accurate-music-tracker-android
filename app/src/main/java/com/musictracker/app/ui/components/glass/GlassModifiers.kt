@@ -79,31 +79,52 @@ fun Modifier.touchPointIllumination(
 }
 
 /**
- * Gel-like interactive flex & spring rebound on press (`scale(0.96, 1.02)`).
- * Disabled automatically when Reduced Motion is active.
+ * Apple iOS 26 Liquid Glass gel-like press-and-hold swell & spring rebound (`scale(1.07, 1.05)`
+ * with a luminous specular sheen while held). Disabled automatically when Reduced Motion is active.
  */
 fun Modifier.liquidBounce(
     pressed: Boolean,
     enabled: Boolean = true
 ): Modifier = composed {
     val accessibility = LiquidGlassTheme.accessibility
+    val colors = LiquidGlassTheme.colors
     if (!enabled || accessibility.reduceMotion) return@composed this
 
     val scaleX by animateFloatAsState(
-        targetValue = if (pressed) 0.96f else 1f,
+        targetValue = if (pressed) 1.07f else 1f,
         animationSpec = LiquidGlassMotion.SpringBounce,
         label = "liquid_bounce_x"
     )
     val scaleY by animateFloatAsState(
-        targetValue = if (pressed) 1.02f else 1f,
+        targetValue = if (pressed) 1.05f else 1f,
         animationSpec = LiquidGlassMotion.SpringBounce,
         label = "liquid_bounce_y"
     )
+    val pressSheen by animateFloatAsState(
+        targetValue = if (pressed) 1f else 0f,
+        animationSpec = LiquidGlassMotion.ReducedMotionSpec,
+        label = "liquid_press_sheen"
+    )
 
-    this.graphicsLayer {
-        this.scaleX = scaleX
-        this.scaleY = scaleY
-    }
+    this
+        .graphicsLayer {
+            this.scaleX = scaleX
+            this.scaleY = scaleY
+        }
+        .drawWithContent {
+            drawContent()
+            if (pressSheen > 0.01f && !accessibility.reduceTransparency) {
+                drawRect(
+                    brush = Brush.verticalGradient(
+                        colorStops = arrayOf(
+                            0.0f to colors.specularTopHighlight.copy(alpha = 0.24f * pressSheen),
+                            0.45f to Color.White.copy(alpha = 0.08f * pressSheen),
+                            1.0f to colors.specularBottomHighlight.copy(alpha = 0.14f * pressSheen)
+                        )
+                    )
+                )
+            }
+        }
 }
 
 /**
