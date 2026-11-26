@@ -2,6 +2,7 @@ package com.musictracker.app.data.repository
 
 import com.musictracker.app.domain.model.ArtistDetailStats
 import com.musictracker.app.domain.model.CompletedListenSession
+import com.musictracker.app.domain.model.LibraryCleanupResult
 import com.musictracker.app.domain.model.ListenEventInsightSample
 import com.musictracker.app.domain.model.ListeningSummary
 import com.musictracker.app.domain.model.RecentListenItem
@@ -26,4 +27,5 @@ interface ListeningRepository {
     ): Flow<List<TopTrackStat>> = flowOf(emptyList())
     fun observeAllListenEventTimestamps(): Flow<List<ListenEventInsightSample>> = flowOf(emptyList())
     suspend fun renormalizeAllTracks(): Int
+    suspend fun cleanAndRenormalizeLibrary(): LibraryCleanupResult = LibraryCleanupResult()
 }

@@ -295,6 +295,7 @@ class StatsViewModel(
     }
 
     fun refresh() {
+        com.musictracker.app.tracking.MusicNotificationListenerService.requestActiveSessionSync()
         refreshTickFlow.value += 1L
     }
 

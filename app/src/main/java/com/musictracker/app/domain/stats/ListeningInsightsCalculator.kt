@@ -138,7 +138,10 @@ object ListeningInsightsCalculator {
         val totalPlays = events.size.toLong()
         val uniqueTrackCount = events.asSequence().map { it.trackId }.toHashSet().size.toLong()
         val maxArtistPlays = events
-            .groupingBy { it.artistKey }
+            .asSequence()
+            .map { it.artistKey.trim().lowercase() }
+            .filter { it.isNotEmpty() && it != "unknown artist" }
+            .groupingBy { it }
             .eachCount()
             .values
             .maxOrNull()

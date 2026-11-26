@@ -28,6 +28,12 @@ interface ListenEventDao {
     @Query("UPDATE listen_events SET track_id = :newTrackId WHERE track_id = :oldTrackId")
     suspend fun reassignTrackId(oldTrackId: Long, newTrackId: Long): Int
 
+    @Query("SELECT COUNT(*) FROM listen_events WHERE track_id = :trackId")
+    suspend fun countByTrackId(trackId: Long): Int
+
+    @Query("DELETE FROM listen_events WHERE actual_listened_ms <= 0")
+    suspend fun deleteZeroDurationEvents(): Int
+
     @Query(
         """
         SELECT
@@ -86,14 +92,14 @@ interface ListenEventDao {
     @Query(
         """
         SELECT
-            MIN(t.normalized_artist) AS artist,
+            MIN(TRIM(t.normalized_artist)) AS artist,
             COALESCE(SUM(e.actual_listened_ms), 0) AS totalListenedMs,
             COUNT(e.id) AS playCount,
             COUNT(DISTINCT t.id) AS uniqueTrackCount
         FROM listen_events e
         INNER JOIN tracks t ON e.track_id = t.id
         WHERE e.started_at_epoch >= :sinceEpochMs
-        GROUP BY CASE WHEN INSTR(t.dedup_key, '::') > 1 THEN SUBSTR(t.dedup_key, 1, INSTR(t.dedup_key, '::') - 1) ELSE LOWER(t.normalized_artist) END
+        GROUP BY CASE WHEN INSTR(t.dedup_key, '::') > 1 THEN LOWER(TRIM(SUBSTR(t.dedup_key, 1, INSTR(t.dedup_key, '::') - 1))) ELSE LOWER(TRIM(t.normalized_artist)) END
         ORDER BY totalListenedMs DESC, playCount DESC, artist ASC
         LIMIT :limit
         """
@@ -125,7 +131,7 @@ interface ListenEventDao {
     @Query(
         """
         SELECT
-            COALESCE(MIN(t.normalized_artist), :artistName) AS artist,
+            COALESCE(MIN(TRIM(t.normalized_artist)), TRIM(:artistName)) AS artist,
             COUNT(e.id) AS playCount,
             COALESCE(SUM(e.actual_listened_ms), 0) AS totalListenedMs,
             COALESCE(SUM(CASE WHEN e.was_skipped = 1 THEN 1 ELSE 0 END), 0) AS skippedCount,
@@ -136,26 +142,26 @@ interface ListenEventDao {
         INNER JOIN tracks t ON e.track_id = t.id
         WHERE e.started_at_epoch >= :sinceEpochMs
           AND (
-              LOWER(t.normalized_artist) = LOWER(:artistName)
+              LOWER(TRIM(t.normalized_artist)) = LOWER(TRIM(:artistName))
               OR (
                   CASE WHEN INSTR(t.dedup_key, '::') > 1
-                      THEN SUBSTR(t.dedup_key, 1, INSTR(t.dedup_key, '::') - 1)
-                      ELSE LOWER(t.normalized_artist)
+                      THEN LOWER(TRIM(SUBSTR(t.dedup_key, 1, INSTR(t.dedup_key, '::') - 1)))
+                      ELSE LOWER(TRIM(t.normalized_artist))
                   END
               ) = (
                   SELECT
                       CASE WHEN INSTR(t2.dedup_key, '::') > 1
-                          THEN SUBSTR(t2.dedup_key, 1, INSTR(t2.dedup_key, '::') - 1)
-                          ELSE LOWER(t2.normalized_artist)
+                          THEN LOWER(TRIM(SUBSTR(t2.dedup_key, 1, INSTR(t2.dedup_key, '::') - 1)))
+                          ELSE LOWER(TRIM(t2.normalized_artist))
                       END
                   FROM tracks t2
-                  WHERE LOWER(t2.normalized_artist) = LOWER(:artistName)
+                  WHERE LOWER(TRIM(t2.normalized_artist)) = LOWER(TRIM(:artistName))
                   LIMIT 1
               )
           )
         GROUP BY CASE WHEN INSTR(t.dedup_key, '::') > 1
-            THEN SUBSTR(t.dedup_key, 1, INSTR(t.dedup_key, '::') - 1)
-            ELSE LOWER(t.normalized_artist)
+            THEN LOWER(TRIM(SUBSTR(t.dedup_key, 1, INSTR(t.dedup_key, '::') - 1)))
+            ELSE LOWER(TRIM(t.normalized_artist))
         END
         HAVING COUNT(e.id) > 0
         LIMIT 1
@@ -177,20 +183,20 @@ interface ListenEventDao {
         INNER JOIN tracks t ON e.track_id = t.id
         WHERE e.started_at_epoch >= :sinceEpochMs
           AND (
-              LOWER(t.normalized_artist) = LOWER(:artistName)
+              LOWER(TRIM(t.normalized_artist)) = LOWER(TRIM(:artistName))
               OR (
                   CASE WHEN INSTR(t.dedup_key, '::') > 1
-                      THEN SUBSTR(t.dedup_key, 1, INSTR(t.dedup_key, '::') - 1)
-                      ELSE LOWER(t.normalized_artist)
+                      THEN LOWER(TRIM(SUBSTR(t.dedup_key, 1, INSTR(t.dedup_key, '::') - 1)))
+                      ELSE LOWER(TRIM(t.normalized_artist))
                   END
               ) = (
                   SELECT
                       CASE WHEN INSTR(t2.dedup_key, '::') > 1
-                          THEN SUBSTR(t2.dedup_key, 1, INSTR(t2.dedup_key, '::') - 1)
-                          ELSE LOWER(t2.normalized_artist)
+                          THEN LOWER(TRIM(SUBSTR(t2.dedup_key, 1, INSTR(t2.dedup_key, '::') - 1)))
+                          ELSE LOWER(TRIM(t2.normalized_artist))
                       END
                   FROM tracks t2
-                  WHERE LOWER(t2.normalized_artist) = LOWER(:artistName)
+                  WHERE LOWER(TRIM(t2.normalized_artist)) = LOWER(TRIM(:artistName))
                   LIMIT 1
               )
           )
@@ -212,8 +218,8 @@ interface ListenEventDao {
             e.actual_listened_ms AS actualListenedMs,
             e.track_id AS trackId,
             CASE WHEN INSTR(t.dedup_key, '::') > 1
-                THEN SUBSTR(t.dedup_key, 1, INSTR(t.dedup_key, '::') - 1)
-                ELSE LOWER(t.normalized_artist)
+                THEN LOWER(TRIM(SUBSTR(t.dedup_key, 1, INSTR(t.dedup_key, '::') - 1)))
+                ELSE LOWER(TRIM(t.normalized_artist))
             END AS artistKey,
             e.was_skipped AS wasSkipped
         FROM listen_events e

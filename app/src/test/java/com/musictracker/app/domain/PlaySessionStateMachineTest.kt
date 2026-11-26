@@ -278,13 +278,13 @@ class PlaySessionStateMachineTest {
         clock.advanceBy(5_000L)
         engine.onPlaybackEvent(PlaybackEvent.StateChanged(ytMusicPkg, PlaybackStateSnapshot(PlaybackStatus.PAUSED, 10_000L)))
 
-        // Duplicate PAUSED 20 min later must NOT reset pausedSinceElapsedMs
-        clock.advanceBy(20L * 60L * 1_000L)
+        // Duplicate PAUSED 2 min later must NOT reset pausedSinceElapsedMs
+        clock.advanceBy(2L * 60L * 1_000L)
         engine.onPlaybackEvent(PlaybackEvent.StateChanged(ytMusicPkg, PlaybackStateSnapshot(PlaybackStatus.PAUSED, 10_000L)))
         assertNotNull(engine.nowTracking.value)
 
-        // 10 more minutes (total 30 min paused) -> times out and finalizes
-        clock.advanceBy(10L * 60L * 1_000L)
+        // 1 more minute (total 3 min paused) -> times out and finalizes
+        clock.advanceBy(1L * 60L * 1_000L)
         val emitted = engine.onTick()
         assertEquals(1, emitted.size)
         assertEquals(10_000L, emitted[0].actualListenedMs)
@@ -468,12 +468,12 @@ class PlaySessionStateMachineTest {
         clock.advanceBy(120_000L)
         engine.onPlaybackEvent(PlaybackEvent.StateChanged(ytMusicPkg, PlaybackStateSnapshot(PlaybackStatus.PAUSED, 120_000L)))
 
-        // 29m59s -> still alive
-        clock.advanceBy(29L * 60L * 1_000L + 59_000L)
+        // 2m59s -> still alive (DEFAULT_IDLE_PAUSE_TIMEOUT_MS = 3m)
+        clock.advanceBy(2L * 60L * 1_000L + 59_000L)
         assertTrue(engine.onTick().isEmpty())
         assertNotNull(engine.nowTracking.value)
 
-        // 30m00s -> finalized
+        // 3m00s -> finalized
         clock.advanceBy(1_000L)
         val emitted = engine.onTick()
         assertEquals(1, emitted.size)
@@ -498,7 +498,7 @@ class PlaySessionStateMachineTest {
         clock.advanceBy(800L)
         engine.onPlaybackEvent(PlaybackEvent.StateChanged(ytMusicPkg, PlaybackStateSnapshot(PlaybackStatus.PAUSED, 800L)))
 
-        clock.advanceBy(30L * 60L * 1_000L)
+        clock.advanceBy(3L * 60L * 1_000L)
         assertTrue(engine.onTick().isEmpty())
         assertNull(engine.nowTracking.value)
     }

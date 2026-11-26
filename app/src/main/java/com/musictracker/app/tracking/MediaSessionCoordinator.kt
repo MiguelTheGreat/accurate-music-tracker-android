@@ -17,6 +17,7 @@ import com.musictracker.app.domain.model.NowTrackingState
 import com.musictracker.app.domain.model.PlaybackEvent
 import com.musictracker.app.domain.model.PlaybackStateSnapshot
 import com.musictracker.app.domain.model.PlaybackStatus
+import com.musictracker.app.domain.normalization.AdAndPlaceholderFilter
 import com.musictracker.app.domain.normalization.MetadataNormalizer
 import com.musictracker.app.domain.normalization.MusicMetadataNormalizer
 import com.musictracker.app.domain.tracking.PlaySessionEngine
@@ -118,10 +119,13 @@ fun MediaMetadata.toDomainSnapshot(): MediaMetadataSnapshot {
         getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE)
     ).orEmpty()
 
+    val displaySubtitle = getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE)
+        ?.takeUnless { AdAndPlaceholderFilter.isPlaceholderSubtitle(it) }
+
     val artist = firstNonBlank(
         getString(MediaMetadata.METADATA_KEY_ARTIST),
         getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST),
-        getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE)
+        displaySubtitle
     ).orEmpty()
 
     val album = firstNonBlank(
@@ -192,7 +196,8 @@ class MediaSessionCoordinator(
     private val debounceMs: Long = PlaySessionStateMachine.DEFAULT_DEBOUNCE_MS,
     private val idlePauseTimeoutMs: Long = PlaySessionStateMachine.DEFAULT_IDLE_PAUSE_TIMEOUT_MS,
     private val artworkRepository: ArtworkRepository? = null,
-    private val metadataNormalizer: MetadataNormalizer = MusicMetadataNormalizer()
+    private val metadataNormalizer: MetadataNormalizer = MusicMetadataNormalizer(),
+    private val livenessCheckIntervalMs: Long = DEFAULT_LIVENESS_CHECK_INTERVAL_MS
 ) {
 
     private data class AttachedEntry(
@@ -211,6 +216,9 @@ class MediaSessionCoordinator(
     val nowTracking: StateFlow<NowTrackingState?>
         get() = playSessionEngine.nowTracking
 
+    internal val isLivenessCheckScheduled: Boolean
+        get() = synchronized(stateLock) { livenessJob?.isActive == true }
+
     private var lastKnownControllers: List<TrackedMediaController> = emptyList()
     private var allowedPackages: Set<String> = DefaultAllowlist.packages
     private val attachedControllers = LinkedHashMap<Any, AttachedEntry>()
@@ -219,6 +227,7 @@ class MediaSessionCoordinator(
     private var allowlistJob: Job? = null
     private var debounceJob: Job? = null
     private var idleTimeoutJob: Job? = null
+    private var livenessJob: Job? = null
 
     fun setListenerConnected(connected: Boolean) {
         _isListenerConnected.value = connected
@@ -305,6 +314,8 @@ class MediaSessionCoordinator(
             debounceJob = null
             idleTimeoutJob?.cancel()
             idleTimeoutJob = null
+            livenessJob?.cancel()
+            livenessJob = null
 
             attachedControllers.values.forEach { entry ->
                 runCatching { entry.controller.unregisterCallback() }
@@ -342,7 +353,27 @@ class MediaSessionCoordinator(
             val focusedEntry = focusedTokenId?.let { attachedControllers[it] }
             if (focusedEntry != null) {
                 val liveState = focusedEntry.controller.currentPlaybackState
-                if (liveState != null && liveState.status != focusedEntry.cachedState?.status) {
+                val liveMetadata = focusedEntry.controller.currentMetadata
+                if (liveState == null) {
+                    focusedEntry.cachedState = null
+                    focusedTokenId = null
+                    emitted += playSessionEngine.onSessionEnded(focusedEntry.controller.packageName)
+                    selectFallbackFocusLocked(emitted)
+                    updateSchedulersLocked()
+                    return emitted
+                }
+                var changed = false
+                if (liveMetadata != null && liveMetadata != focusedEntry.cachedMetadata) {
+                    focusedEntry.cachedMetadata = liveMetadata
+                    emitted += playSessionEngine.onPlaybackEvent(
+                        PlaybackEvent.MetadataChanged(
+                            sourcePackage = focusedEntry.controller.packageName,
+                            metadata = liveMetadata
+                        )
+                    )
+                    changed = true
+                }
+                if (liveState != focusedEntry.cachedState) {
                     focusedEntry.cachedState = liveState
                     emitted += playSessionEngine.onPlaybackEvent(
                         PlaybackEvent.StateChanged(
@@ -354,6 +385,9 @@ class MediaSessionCoordinator(
                         focusedTokenId = null
                         selectFallbackFocusLocked(emitted)
                     }
+                    changed = true
+                }
+                if (changed) {
                     updateSchedulersLocked()
                     return emitted
                 }
@@ -389,6 +423,38 @@ class MediaSessionCoordinator(
             for ((tokenId, controller) in eligibleByToken) {
                 val existing = attachedControllers[tokenId]
                 if (existing != null) {
+                    val liveMeta = existing.controller.currentMetadata
+                    val liveState = existing.controller.currentPlaybackState
+                    if (liveMeta != null && liveMeta != existing.cachedMetadata) {
+                        existing.cachedMetadata = liveMeta
+                        if (focusedTokenId == tokenId) {
+                            emitted += playSessionEngine.onPlaybackEvent(
+                                PlaybackEvent.MetadataChanged(
+                                    sourcePackage = existing.controller.packageName,
+                                    metadata = liveMeta
+                                )
+                            )
+                        }
+                    }
+                    if (liveState != existing.cachedState) {
+                        existing.cachedState = liveState
+                        if (focusedTokenId == tokenId) {
+                            if (liveState == null) {
+                                focusedTokenId = null
+                                emitted += playSessionEngine.onSessionEnded(existing.controller.packageName)
+                            } else {
+                                emitted += playSessionEngine.onPlaybackEvent(
+                                    PlaybackEvent.StateChanged(
+                                        sourcePackage = existing.controller.packageName,
+                                        state = liveState
+                                    )
+                                )
+                                if (liveState.status.isTerminal()) {
+                                    focusedTokenId = null
+                                }
+                            }
+                        }
+                    }
                     reordered[tokenId] = existing
                 } else {
                     val entry = AttachedEntry(
@@ -604,6 +670,83 @@ class MediaSessionCoordinator(
             idleTimeoutJob?.cancel()
             idleTimeoutJob = null
         }
+
+        if (tracking != null && tracking.isPlaying && !tracking.isDebouncing) {
+            if (livenessJob?.isActive != true) {
+                val delayMs = computeNextLivenessDelayMs(tracking)
+                livenessJob = scope.launch(schedulerDispatcher) {
+                    val currentJob = coroutineContext[Job]
+                    delay(delayMs)
+                    handleLivenessCheck(scheduledJob = currentJob)
+                }
+            }
+        } else {
+            livenessJob?.cancel()
+            livenessJob = null
+        }
+    }
+
+    private fun computeNextLivenessDelayMs(tracking: NowTrackingState): Long {
+        if (livenessCheckIntervalMs <= MIN_LIVENESS_CHECK_INTERVAL_MS) {
+            return livenessCheckIntervalMs.coerceAtLeast(1L)
+        }
+        return if (tracking.durationMs > 0L) {
+            val liveDelta = tracking.segmentStartElapsedMs
+                ?.let { (clock.elapsedRealtimeMs() - it).coerceAtLeast(0L) }
+                ?: 0L
+            val remainingTrackMs = (tracking.durationMs - (tracking.accumulatedMs + liveDelta))
+                .coerceAtLeast(0L)
+            minOf(livenessCheckIntervalMs, remainingTrackMs + LIVENESS_TRACK_END_BUFFER_MS)
+                .coerceAtLeast(MIN_LIVENESS_CHECK_INTERVAL_MS)
+        } else {
+            livenessCheckIntervalMs
+        }
+    }
+
+    private fun handleLivenessCheck(scheduledJob: Job?) {
+        val emitted = synchronized(stateLock) {
+            if (livenessJob === scheduledJob) {
+                livenessJob = null
+            }
+            val results = mutableListOf<CompletedListenSession>()
+            val focusedEntry = focusedTokenId?.let { attachedControllers[it] }
+            if (focusedEntry != null) {
+                val liveState = focusedEntry.controller.currentPlaybackState
+                val liveMetadata = focusedEntry.controller.currentMetadata
+                if (liveState == null) {
+                    focusedEntry.cachedState = null
+                    focusedTokenId = null
+                    results += playSessionEngine.onSessionEnded(focusedEntry.controller.packageName)
+                    selectFallbackFocusLocked(results)
+                } else {
+                    if (liveMetadata != null && liveMetadata != focusedEntry.cachedMetadata) {
+                        focusedEntry.cachedMetadata = liveMetadata
+                        results += playSessionEngine.onPlaybackEvent(
+                            PlaybackEvent.MetadataChanged(
+                                sourcePackage = focusedEntry.controller.packageName,
+                                metadata = liveMetadata
+                            )
+                        )
+                    }
+                    focusedEntry.cachedState = liveState
+                    results += playSessionEngine.onPlaybackEvent(
+                        PlaybackEvent.StateChanged(
+                            sourcePackage = focusedEntry.controller.packageName,
+                            state = liveState
+                        )
+                    )
+                    if (liveState.status.isTerminal()) {
+                        focusedTokenId = null
+                        selectFallbackFocusLocked(results)
+                    }
+                }
+            } else {
+                results += playSessionEngine.onTick()
+            }
+            updateSchedulersLocked()
+            results
+        }
+        persistSessionsAsync(emitted)
     }
 
     private fun handleScheduledTick(isDebounce: Boolean, scheduledJob: Job?) {
@@ -658,5 +801,8 @@ class MediaSessionCoordinator(
 
     companion object {
         private const val TAG = "MediaSessionCoordinator"
+        const val DEFAULT_LIVENESS_CHECK_INTERVAL_MS = 60_000L
+        const val MIN_LIVENESS_CHECK_INTERVAL_MS = 15_000L
+        private const val LIVENESS_TRACK_END_BUFFER_MS = 5_000L
     }
 }

@@ -8,6 +8,7 @@ import com.musictracker.app.domain.model.PlaybackEvent
 import com.musictracker.app.domain.model.PlaybackStateSnapshot
 import com.musictracker.app.domain.model.PlaybackStatus
 import com.musictracker.app.domain.model.TrackIdentity
+import com.musictracker.app.domain.normalization.AdAndPlaceholderFilter
 import com.musictracker.app.domain.normalization.MetadataNormalizer
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -27,6 +28,7 @@ class PlaySessionStateMachine(
 
     private data class SessionRecord(
         val identity: TrackIdentity,
+        val dedupKey: String,
         var normalizedTitle: String,
         var normalizedArtist: String,
         var album: String,
@@ -37,7 +39,10 @@ class PlaySessionStateMachine(
         var accumulatedMs: Long = 0L,
         var segmentStartElapsedMs: Long? = null,
         var pausedSinceElapsedMs: Long? = null,
-        var lastPlayingPositionMs: Long = 0L
+        var lastPlayingPositionMs: Long = 0L,
+        var lastPositionUpdateElapsedMs: Long = 0L,
+        var lastRealProgressElapsedMs: Long = 0L,
+        var lastPlaybackSpeed: Float = 1.0f
     ) {
         fun toNowTrackingState(): NowTrackingState = NowTrackingState(
             sourcePackage = identity.sourcePackage,
@@ -74,16 +79,16 @@ class PlaySessionStateMachine(
                     session != null &&
                     session.identity.sourcePackage == pkg &&
                     event.state.status == PlaybackStatus.PLAYING &&
+                    event.state.playbackSpeed > 0f &&
                     session.phase == Phase.ACTIVE &&
                     session.segmentStartElapsedMs != null &&
                     _nowTracking.value != null &&
+                    !isStalled(session, event.state, now) &&
                     !isSingleTrackLoop(session, newPos = event.state.positionMs, now = now)
                 ) {
                     latestStateByPackage[pkg] = event.state
                     session.pausedSinceElapsedMs = null
-                    if (event.state.positionMs >= 0L) {
-                        session.lastPlayingPositionMs = event.state.positionMs
-                    }
+                    updatePlayingTelemetry(session, event.state, now)
                     return emptyList()
                 }
             }
@@ -179,44 +184,78 @@ class PlaySessionStateMachine(
             return false
         }
 
+        if (AdAndPlaceholderFilter.isAdOrPlaceholder(metadata)) {
+            if (currentSession?.identity?.sourcePackage == pkg) {
+                finalizeOrDiscardCurrent(now, isLoopRestart = false, emitted = emitted)
+            }
+            latestMetadataByPackage.remove(pkg)
+            return false
+        }
+
         latestMetadataByPackage[pkg] = metadata
         val incomingIdentity = TrackIdentity(
             sourcePackage = pkg,
             rawTitle = metadata.title.trim(),
             rawArtist = metadata.artist.trim()
         )
+        val incomingNorm = normalizer.normalize(incomingIdentity.rawTitle, incomingIdentity.rawArtist)
         val session = currentSession
 
         return when {
-            session != null && session.identity == incomingIdentity -> {
+            session != null && isSameTrack(session, pkg, incomingIdentity, incomingNorm.dedupKey) -> {
                 val patched = patchMetadataInPlace(session, metadata)
                 promoteIfEligible(session, now)
                 patched
             }
 
             session != null && session.identity.sourcePackage == pkg -> {
+                val latestState = latestStateByPackage[pkg]
                 val wasPlaying = session.segmentStartElapsedMs != null ||
-                    latestStateByPackage[pkg]?.status == PlaybackStatus.PLAYING
+                    (latestState?.status == PlaybackStatus.PLAYING && latestState.playbackSpeed > 0f)
                 finalizeOrDiscardCurrent(now, isLoopRestart = false, emitted = emitted)
-                if (wasPlaying) {
-                    startNewSession(pkg, metadata, initialPosMs = 0L, now = now)
+                if (wasPlaying && !isStalePreExistingPlayingState(latestState, metadata.durationMs, now)) {
+                    startNewSession(
+                        pkg = pkg,
+                        metadata = metadata,
+                        initialPosMs = 0L,
+                        now = now,
+                        state = latestState
+                    )
                 }
                 false
             }
 
             session == null -> {
                 val latestState = latestStateByPackage[pkg]
-                if (latestState?.status == PlaybackStatus.PLAYING) {
-                    startNewSession(pkg, metadata, initialPosMs = latestState.positionMs, now = now)
+                if (
+                    latestState?.status == PlaybackStatus.PLAYING &&
+                    !isStalePreExistingPlayingState(latestState, metadata.durationMs, now)
+                ) {
+                    startNewSession(
+                        pkg = pkg,
+                        metadata = metadata,
+                        initialPosMs = latestState.positionMs,
+                        now = now,
+                        state = latestState
+                    )
                 }
                 false
             }
 
             else -> {
                 val latestState = latestStateByPackage[pkg]
-                if (latestState?.status == PlaybackStatus.PLAYING) {
+                if (
+                    latestState?.status == PlaybackStatus.PLAYING &&
+                    !isStalePreExistingPlayingState(latestState, metadata.durationMs, now)
+                ) {
                     finalizeOrDiscardCurrent(now, isLoopRestart = false, emitted = emitted)
-                    startNewSession(pkg, metadata, initialPosMs = latestState.positionMs, now = now)
+                    startNewSession(
+                        pkg = pkg,
+                        metadata = metadata,
+                        initialPosMs = latestState.positionMs,
+                        now = now,
+                        state = latestState
+                    )
                 }
                 false
             }
@@ -236,9 +275,19 @@ class PlaySessionStateMachine(
             session != null && session.identity.sourcePackage != pkg -> {
                 if (state.status == PlaybackStatus.PLAYING) {
                     val meta = latestMetadataByPackage[pkg]
-                    if (meta != null) {
+                    if (
+                        meta != null &&
+                        !AdAndPlaceholderFilter.isAdOrPlaceholder(meta) &&
+                        !isStalePreExistingPlayingState(state, meta.durationMs, now)
+                    ) {
                         finalizeOrDiscardCurrent(now, isLoopRestart = false, emitted = emitted)
-                        startNewSession(pkg, meta, initialPosMs = state.positionMs, now = now)
+                        startNewSession(
+                            pkg = pkg,
+                            metadata = meta,
+                            initialPosMs = state.positionMs,
+                            now = now,
+                            state = state
+                        )
                     }
                 }
             }
@@ -246,8 +295,18 @@ class PlaySessionStateMachine(
             session == null -> {
                 if (state.status == PlaybackStatus.PLAYING) {
                     val meta = latestMetadataByPackage[pkg]
-                    if (meta != null) {
-                        startNewSession(pkg, meta, initialPosMs = state.positionMs, now = now)
+                    if (
+                        meta != null &&
+                        !AdAndPlaceholderFilter.isAdOrPlaceholder(meta) &&
+                        !isStalePreExistingPlayingState(state, meta.durationMs, now)
+                    ) {
+                        startNewSession(
+                            pkg = pkg,
+                            metadata = meta,
+                            initialPosMs = state.positionMs,
+                            now = now,
+                            state = state
+                        )
                     }
                 }
             }
@@ -265,6 +324,17 @@ class PlaySessionStateMachine(
         now: Long,
         emitted: MutableList<CompletedListenSession>
     ): Boolean {
+        if (metadata != null && metadata.title.isNotBlank() && AdAndPlaceholderFilter.isAdOrPlaceholder(metadata)) {
+            if (currentSession?.identity?.sourcePackage == pkg) {
+                finalizeOrDiscardCurrent(now, isLoopRestart = false, emitted = emitted, state = state)
+            }
+            latestMetadataByPackage.remove(pkg)
+            if (state != null) {
+                latestStateByPackage[pkg] = state
+            }
+            return false
+        }
+
         val validMeta = metadata?.takeIf { it.title.isNotBlank() }
         if (validMeta != null) {
             latestMetadataByPackage[pkg] = validMeta
@@ -283,16 +353,32 @@ class PlaySessionStateMachine(
                     rawArtist = it.artist.trim()
                 )
             }
-            if (incomingIdentity != null && incomingIdentity != session.identity) {
+            val incomingDedupKey = incomingIdentity?.let {
+                normalizer.normalize(it.rawTitle, it.rawArtist).dedupKey
+            }
+            if (
+                incomingIdentity != null &&
+                incomingDedupKey != null &&
+                !isSameTrack(session, pkg, incomingIdentity, incomingDedupKey)
+            ) {
+                val effectiveState = state ?: latestStateByPackage[pkg]
                 val shouldStartPlaying = if (state != null) {
-                    state.status == PlaybackStatus.PLAYING
+                    state.status == PlaybackStatus.PLAYING &&
+                        !isStalePreExistingPlayingState(state, validMeta.durationMs, now)
                 } else {
-                    session.segmentStartElapsedMs != null ||
-                        latestStateByPackage[pkg]?.status == PlaybackStatus.PLAYING
+                    (session.segmentStartElapsedMs != null ||
+                        latestStateByPackage[pkg]?.status == PlaybackStatus.PLAYING) &&
+                        !isStalePreExistingPlayingState(effectiveState, validMeta.durationMs, now)
                 }
                 finalizeOrDiscardCurrent(now, isLoopRestart = false, emitted = emitted)
                 if (shouldStartPlaying) {
-                    startNewSession(pkg, validMeta, initialPosMs = state?.positionMs ?: 0L, now = now)
+                    startNewSession(
+                        pkg = pkg,
+                        metadata = validMeta,
+                        initialPosMs = state?.positionMs ?: 0L,
+                        now = now,
+                        state = effectiveState
+                    )
                 }
             } else {
                 if (validMeta != null) {
@@ -307,11 +393,21 @@ class PlaySessionStateMachine(
         } else {
             if (state?.status == PlaybackStatus.PLAYING) {
                 val effectiveMeta = validMeta ?: latestMetadataByPackage[pkg]
-                if (effectiveMeta != null) {
+                if (
+                    effectiveMeta != null &&
+                    !AdAndPlaceholderFilter.isAdOrPlaceholder(effectiveMeta) &&
+                    !isStalePreExistingPlayingState(state, effectiveMeta.durationMs, now)
+                ) {
                     if (session != null) {
                         finalizeOrDiscardCurrent(now, isLoopRestart = false, emitted = emitted)
                     }
-                    startNewSession(pkg, effectiveMeta, initialPosMs = state.positionMs, now = now)
+                    startNewSession(
+                        pkg = pkg,
+                        metadata = effectiveMeta,
+                        initialPosMs = state.positionMs,
+                        now = now,
+                        state = state
+                    )
                 }
             }
         }
@@ -325,10 +421,31 @@ class PlaySessionStateMachine(
         emitted: MutableList<CompletedListenSession>
     ) {
         when {
+            state.status == PlaybackStatus.PLAYING && state.playbackSpeed <= 0f -> {
+                val effectiveEnd = resolveEffectiveEnd(session, now, state)
+                closePlayingSegment(session, effectiveEnd)
+                promoteIfEligible(session, effectiveEnd)
+                if (session.pausedSinceElapsedMs == null) {
+                    session.pausedSinceElapsedMs = effectiveEnd
+                }
+                checkIdlePauseTimeout(now, emitted)
+            }
+
+            state.status == PlaybackStatus.PLAYING && isStalled(session, state, now) -> {
+                val stallEnd = session.lastRealProgressElapsedMs.coerceAtMost(now)
+                closePlayingSegment(session, stallEnd)
+                promoteIfEligible(session, stallEnd)
+                if (session.pausedSinceElapsedMs == null) {
+                    session.pausedSinceElapsedMs = now
+                }
+                checkIdlePauseTimeout(now, emitted)
+            }
+
             state.status == PlaybackStatus.PLAYING -> {
                 promoteIfEligible(session, now)
                 if (isSingleTrackLoop(session, newPos = state.positionMs, now = now)) {
                     val repeatIdentity = session.identity
+                    val repeatDedupKey = session.dedupKey
                     val repeatNormalizedTitle = session.normalizedTitle
                     val repeatNormalizedArtist = session.normalizedArtist
                     val repeatAlbum = session.album
@@ -338,6 +455,7 @@ class PlaySessionStateMachine(
                     finalizeOrDiscardCurrent(now, isLoopRestart = true, emitted = emitted)
                     currentSession = SessionRecord(
                         identity = repeatIdentity,
+                        dedupKey = repeatDedupKey,
                         normalizedTitle = repeatNormalizedTitle,
                         normalizedArtist = repeatNormalizedArtist,
                         album = repeatAlbum,
@@ -348,32 +466,119 @@ class PlaySessionStateMachine(
                         accumulatedMs = 0L,
                         segmentStartElapsedMs = now,
                         pausedSinceElapsedMs = null,
-                        lastPlayingPositionMs = state.positionMs.coerceAtLeast(0L)
+                        lastPlayingPositionMs = state.positionMs.coerceAtLeast(0L),
+                        lastPositionUpdateElapsedMs = state.lastPositionUpdateTimeMs.coerceAtLeast(0L),
+                        lastRealProgressElapsedMs = now,
+                        lastPlaybackSpeed = state.playbackSpeed.takeIf { it > 0.05f && it.isFinite() } ?: 1.0f
                     )
                 } else {
                     if (session.segmentStartElapsedMs == null) {
                         session.segmentStartElapsedMs = now
+                        session.lastRealProgressElapsedMs = now
                     }
                     session.pausedSinceElapsedMs = null
-                    if (state.positionMs >= 0L) {
-                        session.lastPlayingPositionMs = state.positionMs
-                    }
+                    updatePlayingTelemetry(session, state, now)
                     promoteIfEligible(session, now)
                 }
             }
 
             state.status.isTerminal() -> {
-                finalizeOrDiscardCurrent(now, isLoopRestart = false, emitted = emitted)
+                finalizeOrDiscardCurrent(now, isLoopRestart = false, emitted = emitted, state = state)
             }
 
             else -> {
-                closePlayingSegment(session, now)
-                promoteIfEligible(session, now)
+                val effectiveEnd = resolveEffectiveEnd(session, now, state)
+                closePlayingSegment(session, effectiveEnd)
+                promoteIfEligible(session, effectiveEnd)
                 if (session.pausedSinceElapsedMs == null) {
-                    session.pausedSinceElapsedMs = now
+                    session.pausedSinceElapsedMs = effectiveEnd
                 }
+                checkIdlePauseTimeout(now, emitted)
             }
         }
+    }
+
+    private fun isSameTrack(
+        session: SessionRecord,
+        pkg: String,
+        incomingIdentity: TrackIdentity,
+        incomingDedupKey: String
+    ): Boolean = session.identity.sourcePackage == pkg &&
+        (session.identity == incomingIdentity ||
+            (session.dedupKey.isNotEmpty() && session.dedupKey == incomingDedupKey))
+
+    private fun isStalled(
+        session: SessionRecord,
+        state: PlaybackStateSnapshot,
+        now: Long
+    ): Boolean {
+        if (state.lastPositionUpdateTimeMs <= 0L || session.lastPositionUpdateElapsedMs <= 0L) {
+            return false
+        }
+        if (state.positionMs < 0L) return false
+        return state.positionMs == session.lastPlayingPositionMs &&
+            (now - session.lastRealProgressElapsedMs) >= STALL_THRESHOLD_MS
+    }
+
+    private fun isStalePreExistingPlayingState(
+        state: PlaybackStateSnapshot?,
+        durationMs: Long,
+        now: Long
+    ): Boolean {
+        if (state == null || state.status != PlaybackStatus.PLAYING) return false
+        if (state.playbackSpeed <= 0f) return true
+        if (state.lastPositionUpdateTimeMs > 0L && durationMs > 0L) {
+            val elapsedSinceUpdate = (now - state.lastPositionUpdateTimeMs).coerceAtLeast(0L)
+            val speed = state.playbackSpeed.takeIf { it > 0.05f && it.isFinite() } ?: 1.0f
+            val projectedPos = state.positionMs.coerceAtLeast(0L) + (elapsedSinceUpdate * speed).toLong()
+            if (projectedPos > durationMs + STALE_ATTACH_GRACE_MS) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun updatePlayingTelemetry(
+        session: SessionRecord,
+        state: PlaybackStateSnapshot,
+        now: Long
+    ) {
+        if (state.positionMs >= 0L) {
+            if (state.positionMs != session.lastPlayingPositionMs) {
+                session.lastRealProgressElapsedMs = now
+            }
+            session.lastPlayingPositionMs = state.positionMs
+        }
+        if (state.lastPositionUpdateTimeMs > 0L) {
+            session.lastPositionUpdateElapsedMs = state.lastPositionUpdateTimeMs
+        }
+        if (state.playbackSpeed > 0.05f && state.playbackSpeed.isFinite()) {
+            session.lastPlaybackSpeed = state.playbackSpeed
+        }
+    }
+
+    private fun resolveEffectiveEnd(
+        session: SessionRecord,
+        now: Long,
+        state: PlaybackStateSnapshot? = null
+    ): Long {
+        if (state != null && state.lastPositionUpdateTimeMs > 0L) {
+            val start = session.segmentStartElapsedMs
+            if (start != null && state.lastPositionUpdateTimeMs in start..now) {
+                return state.lastPositionUpdateTimeMs
+            }
+        }
+
+        if (session.durationMs > 0L && session.lastPositionUpdateElapsedMs > 0L) {
+            val speed = session.lastPlaybackSpeed.takeIf { it > 0.05f && it.isFinite() } ?: 1.0f
+            val remainingMs = ((session.durationMs - session.lastPlayingPositionMs).coerceAtLeast(0L) / speed).toLong()
+            val projectedEnd = session.lastPositionUpdateElapsedMs + remainingMs + TRACK_OVERRUN_GRACE_MS
+            if (now > projectedEnd) {
+                return projectedEnd
+            }
+        }
+
+        return now
     }
 
     private fun isSingleTrackLoop(session: SessionRecord, newPos: Long, now: Long): Boolean {
@@ -400,9 +605,15 @@ class PlaySessionStateMachine(
         return session.accumulatedMs + liveDelta
     }
 
-    private fun closePlayingSegment(session: SessionRecord, now: Long) {
+    private fun closePlayingSegment(session: SessionRecord, effectiveEnd: Long) {
         val start = session.segmentStartElapsedMs ?: return
-        session.accumulatedMs += (now - start).coerceAtLeast(0L)
+        val rawDelta = (effectiveEnd - start).coerceAtLeast(0L)
+        val maxSingleSegmentMs = if (session.durationMs > 0L) {
+            maxOf(session.durationMs * 2L, session.durationMs + 120_000L)
+        } else {
+            MAX_UNKNOWN_DURATION_SEGMENT_MS
+        }
+        session.accumulatedMs += rawDelta.coerceAtMost(maxSingleSegmentMs)
         session.segmentStartElapsedMs = null
     }
 
@@ -424,14 +635,16 @@ class PlaySessionStateMachine(
     private fun finalizeOrDiscardCurrent(
         now: Long,
         isLoopRestart: Boolean,
-        emitted: MutableList<CompletedListenSession>
+        emitted: MutableList<CompletedListenSession>,
+        state: PlaybackStateSnapshot? = null
     ) {
         val session = currentSession ?: return
-        closePlayingSegment(session, now)
-        promoteIfEligible(session, now)
+        val effectiveEnd = resolveEffectiveEnd(session, now, state)
+        closePlayingSegment(session, effectiveEnd)
+        promoteIfEligible(session, effectiveEnd)
         currentSession = null
 
-        if (session.phase == Phase.ACTIVE) {
+        if (session.phase == Phase.ACTIVE && session.accumulatedMs > 0L) {
             val actualMs = session.accumulatedMs
             val completedRatio = if (session.durationMs > 0L) {
                 actualMs.toFloat() / session.durationMs.toFloat()
@@ -466,7 +679,8 @@ class PlaySessionStateMachine(
         pkg: String,
         metadata: MediaMetadataSnapshot,
         initialPosMs: Long,
-        now: Long
+        now: Long,
+        state: PlaybackStateSnapshot? = null
     ) {
         val identity = TrackIdentity(
             sourcePackage = pkg,
@@ -476,6 +690,7 @@ class PlaySessionStateMachine(
         val normalized = normalizer.normalize(identity.rawTitle, identity.rawArtist)
         currentSession = SessionRecord(
             identity = identity,
+            dedupKey = normalized.dedupKey,
             normalizedTitle = normalized.normalizedTitle,
             normalizedArtist = normalized.normalizedArtist,
             album = metadata.album.trim(),
@@ -486,7 +701,10 @@ class PlaySessionStateMachine(
             accumulatedMs = 0L,
             segmentStartElapsedMs = now,
             pausedSinceElapsedMs = null,
-            lastPlayingPositionMs = initialPosMs.coerceAtLeast(0L)
+            lastPlayingPositionMs = initialPosMs.coerceAtLeast(0L),
+            lastPositionUpdateElapsedMs = state?.lastPositionUpdateTimeMs?.coerceAtLeast(0L) ?: 0L,
+            lastRealProgressElapsedMs = now,
+            lastPlaybackSpeed = state?.playbackSpeed?.takeIf { it > 0.05f && it.isFinite() } ?: 1.0f
         )
     }
 
@@ -530,5 +748,9 @@ class PlaySessionStateMachine(
         const val LOOP_MIN_LISTENED_MS = 10_000L
         const val SKIP_COMPLETION_THRESHOLD = 0.50f
         const val SKIP_UNKNOWN_DURATION_MS = 30_000L
+        const val TRACK_OVERRUN_GRACE_MS = 15_000L
+        const val STALL_THRESHOLD_MS = 20_000L
+        const val STALE_ATTACH_GRACE_MS = 60_000L
+        const val MAX_UNKNOWN_DURATION_SEGMENT_MS = 2L * 60L * 60L * 1_000L
     }
 }

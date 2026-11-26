@@ -32,7 +32,9 @@ data class SettingsUiState(
     val isLoadingApps: Boolean = true,
     val exportState: ExportUiState = ExportUiState.Idle,
     val reduceTransparencyEnabled: Boolean = false,
-    val onlineArtworkEnabled: Boolean = true
+    val onlineArtworkEnabled: Boolean = true,
+    val isCleaningLibrary: Boolean = false,
+    val libraryCleanupFeedback: String? = null
 ) {
     val isExporting: Boolean
         get() = exportState is ExportUiState.InProgress

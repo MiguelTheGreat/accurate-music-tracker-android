@@ -7,8 +7,10 @@ import com.musictracker.app.data.export.DataExporter
 import com.musictracker.app.data.preferences.AccessibilityPreferencesStore
 import com.musictracker.app.data.preferences.AllowlistRepository
 import com.musictracker.app.data.preferences.ArtworkPreferencesStore
+import com.musictracker.app.data.repository.ListeningRepository
 import com.musictracker.app.di.AppContainer
 import com.musictracker.app.domain.model.ExportResult
+import com.musictracker.app.domain.model.LibraryCleanupResult
 import com.musictracker.app.tracking.InstalledAppInfo
 import com.musictracker.app.tracking.SystemPermissionHelper
 import kotlinx.coroutines.CancellationException
@@ -33,7 +35,8 @@ class SettingsViewModel(
     private val dataExporter: DataExporter,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val onlineArtworkEnabledFlow: Flow<Boolean> = flowOf(true),
-    private val setOnlineArtworkEnabled: suspend (Boolean) -> Unit = {}
+    private val setOnlineArtworkEnabled: suspend (Boolean) -> Unit = {},
+    private val runLibraryCleanup: suspend () -> LibraryCleanupResult = { LibraryCleanupResult() }
 ) : ViewModel() {
 
     constructor(
@@ -42,7 +45,8 @@ class SettingsViewModel(
         accessibilityPreferencesStore: AccessibilityPreferencesStore,
         dataExporter: DataExporter,
         ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
-        artworkPreferencesStore: ArtworkPreferencesStore? = null
+        artworkPreferencesStore: ArtworkPreferencesStore? = null,
+        listeningRepository: ListeningRepository? = null
     ) : this(
         systemPermissionHelper = systemPermissionHelper,
         allowlistRepository = allowlistRepository,
@@ -55,6 +59,9 @@ class SettingsViewModel(
         onlineArtworkEnabledFlow = artworkPreferencesStore?.onlineArtworkEnabled ?: flowOf(true),
         setOnlineArtworkEnabled = { enabled ->
             artworkPreferencesStore?.setOnlineArtworkEnabled(enabled)
+        },
+        runLibraryCleanup = {
+            listeningRepository?.cleanAndRenormalizeLibrary() ?: LibraryCleanupResult()
         }
     )
 
@@ -68,6 +75,8 @@ class SettingsViewModel(
     private val installedAppsFlow = MutableStateFlow<List<InstalledAppInfo>>(emptyList())
     private val isLoadingAppsFlow = MutableStateFlow(true)
     private val exportStateFlow = MutableStateFlow<ExportUiState>(ExportUiState.Idle)
+    private val isCleaningLibraryFlow = MutableStateFlow(false)
+    private val libraryCleanupFeedbackFlow = MutableStateFlow<String?>(null)
 
     private val filteredAppsFlow = combine(
         installedAppsFlow,
@@ -105,7 +114,9 @@ class SettingsViewModel(
 
     private data class PreferenceTogglesSnapshot(
         val reduceTransparency: Boolean,
-        val onlineArtworkEnabled: Boolean
+        val onlineArtworkEnabled: Boolean,
+        val isCleaningLibrary: Boolean,
+        val libraryCleanupFeedback: String?
     )
 
     private val systemStatusFlow = combine(
@@ -118,11 +129,15 @@ class SettingsViewModel(
 
     private val preferenceTogglesFlow = combine(
         reduceTransparencyFlow,
-        onlineArtworkEnabledFlow
-    ) { reduceTransparency, onlineArtwork ->
+        onlineArtworkEnabledFlow,
+        isCleaningLibraryFlow,
+        libraryCleanupFeedbackFlow
+    ) { reduceTransparency, onlineArtwork, isCleaningLibrary, cleanupFeedback ->
         PreferenceTogglesSnapshot(
             reduceTransparency = reduceTransparency,
-            onlineArtworkEnabled = onlineArtwork
+            onlineArtworkEnabled = onlineArtwork,
+            isCleaningLibrary = isCleaningLibrary,
+            libraryCleanupFeedback = cleanupFeedback
         )
     }
 
@@ -141,7 +156,9 @@ class SettingsViewModel(
             isLoadingApps = isLoadingApps,
             exportState = exportState,
             reduceTransparencyEnabled = toggles.reduceTransparency,
-            onlineArtworkEnabled = toggles.onlineArtworkEnabled
+            onlineArtworkEnabled = toggles.onlineArtworkEnabled,
+            isCleaningLibrary = toggles.isCleaningLibrary,
+            libraryCleanupFeedback = toggles.libraryCleanupFeedback
         )
     }.stateIn(
         scope = viewModelScope,
@@ -194,6 +211,45 @@ class SettingsViewModel(
         viewModelScope.launch {
             setOnlineArtworkEnabled(enabled)
         }
+    }
+
+    fun cleanAndRenormalizeLibrary() {
+        if (isCleaningLibraryFlow.value) return
+        isCleaningLibraryFlow.value = true
+        libraryCleanupFeedbackFlow.value = null
+
+        viewModelScope.launch {
+            val feedback = withContext(ioDispatcher) {
+                runCatching {
+                    val result = runLibraryCleanup()
+                    formatCleanupFeedback(result)
+                }.getOrElse { throwable ->
+                    if (throwable is CancellationException) throw throwable
+                    "Cleanup failed: ${throwable.message ?: "unexpected error"}"
+                }
+            }
+            libraryCleanupFeedbackFlow.value = feedback
+            isCleaningLibraryFlow.value = false
+        }
+    }
+
+    private fun formatCleanupFeedback(result: LibraryCleanupResult): String {
+        if (!result.hasChanges) {
+            return "Library is already clean"
+        }
+        val parts = buildList {
+            if (result.removedAdTracks > 0 || result.removedAdEvents > 0) {
+                val count = maxOf(result.removedAdTracks, result.removedAdEvents)
+                add("removed $count ad/invalid ${if (count == 1) "entry" else "entries"}")
+            }
+            if (result.mergedDuplicateTracks > 0) {
+                add("merged ${result.mergedDuplicateTracks} duplicate ${if (result.mergedDuplicateTracks == 1) "track" else "tracks"}")
+            }
+            if (result.updatedTracks > 0) {
+                add("updated ${result.updatedTracks} ${if (result.updatedTracks == 1) "track" else "tracks"}")
+            }
+        }
+        return "Cleaned library: ${parts.joinToString(", ")}"
     }
 
     fun exportJson(openOutputStream: () -> OutputStream?) {
@@ -275,7 +331,8 @@ class SettingsViewModel(
                         accessibilityPreferencesStore = appContainer.accessibilityPreferencesStore,
                         dataExporter = appContainer.dataExporter,
                         ioDispatcher = appContainer.ioDispatcher,
-                        artworkPreferencesStore = appContainer.artworkPreferencesStore
+                        artworkPreferencesStore = appContainer.artworkPreferencesStore,
+                        listeningRepository = appContainer.listeningRepository
                     ) as T
                 }
             }

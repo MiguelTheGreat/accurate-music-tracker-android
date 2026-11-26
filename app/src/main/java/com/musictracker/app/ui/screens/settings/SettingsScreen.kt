@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Backup
+import androidx.compose.material.icons.rounded.CleaningServices
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.CircularProgressIndicator
@@ -137,6 +138,7 @@ fun SettingsRoute(
         onDismissExportFeedback = viewModel::clearExportFeedback,
         onToggleReduceTransparency = viewModel::onToggleReduceTransparency,
         onToggleOnlineArtwork = viewModel::onToggleOnlineArtwork,
+        onCleanLibraryClick = viewModel::cleanAndRenormalizeLibrary,
         modifier = modifier
     )
 }
@@ -153,7 +155,8 @@ fun SettingsScreenContent(
     onDismissExportFeedback: () -> Unit,
     onToggleReduceTransparency: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
-    onToggleOnlineArtwork: (Boolean) -> Unit = {}
+    onToggleOnlineArtwork: (Boolean) -> Unit = {},
+    onCleanLibraryClick: () -> Unit = {}
 ) {
     val colors = LiquidGlassTheme.colors
     val accessibility = LiquidGlassTheme.accessibility
@@ -321,6 +324,59 @@ fun SettingsScreenContent(
                             maxLines = 1
                         )
                     }
+                }
+
+                HorizontalDivider(
+                    color = colors.standardCardBorder,
+                    modifier = Modifier.padding(vertical = 14.dp)
+                )
+
+                Text(
+                    text = "Remove recorded streaming ads and merge duplicate tracks or artists using preserved raw metadata.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.labelSecondary
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                LiquidGlassButton(
+                    onClick = onCleanLibraryClick,
+                    enabled = !uiState.isCleaningLibrary && !uiState.isExporting,
+                    variant = LiquidGlassVariant.Regular,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag(TestTags.SETTINGS_CLEAN_LIBRARY_BTN)
+                ) {
+                    if (uiState.isCleaningLibrary) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = colors.labelPrimary
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Rounded.CleaningServices,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Text(
+                        text = if (uiState.isCleaningLibrary) {
+                            "Cleaning Library..."
+                        } else {
+                            "Clean & Re-normalize Library"
+                        },
+                        style = MaterialTheme.typography.labelLarge,
+                        maxLines = 1
+                    )
+                }
+
+                uiState.libraryCleanupFeedback?.let { feedback ->
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = feedback,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.accentGreen,
+                        modifier = Modifier.testTag(TestTags.SETTINGS_CLEAN_LIBRARY_FEEDBACK)
+                    )
                 }
             }
         }

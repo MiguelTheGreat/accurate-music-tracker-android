@@ -8,12 +8,14 @@ import com.musictracker.app.data.db.TrackDao
 import com.musictracker.app.data.db.TrackEntity
 import com.musictracker.app.domain.model.ArtistDetailStats
 import com.musictracker.app.domain.model.CompletedListenSession
+import com.musictracker.app.domain.model.LibraryCleanupResult
 import com.musictracker.app.domain.model.ListenEventInsightSample
 import com.musictracker.app.domain.model.ListeningSummary
 import com.musictracker.app.domain.model.RecentListenItem
 import com.musictracker.app.domain.model.TopArtistStat
 import com.musictracker.app.domain.model.TopTrackStat
 import com.musictracker.app.domain.model.TrackDetailStats
+import com.musictracker.app.domain.normalization.AdAndPlaceholderFilter
 import com.musictracker.app.domain.normalization.MetadataNormalizer
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -26,6 +28,12 @@ class ListeningRepositoryImpl(
 ) : ListeningRepository {
 
     override suspend fun recordCompletedSession(session: CompletedListenSession) {
+        if (session.rawTitle.isBlank()) return
+        if (session.actualListenedMs <= 0L) return
+        if (AdAndPlaceholderFilter.isAdOrPlaceholder(session.rawTitle, session.rawArtist, session.album)) {
+            return
+        }
+
         val normalized = normalizer.normalize(session.rawTitle, session.rawArtist)
         val cleanAlbum = session.album.trim()
         val cleanDuration = session.durationMs.coerceAtLeast(0L)
@@ -119,8 +127,41 @@ class ListeningRepositoryImpl(
         listenEventDao.observeAllListenEventTimestamps()
 
     override suspend fun renormalizeAllTracks(): Int = database.withTransaction {
+        val (mergedDuplicates, updatedTracks) = renormalizeTracksInTransaction()
+        mergedDuplicates + updatedTracks
+    }
+
+    override suspend fun cleanAndRenormalizeLibrary(): LibraryCleanupResult = database.withTransaction {
         val allTracks = trackDao.getAll()
-        if (allTracks.isEmpty()) return@withTransaction 0
+        var removedAdTracks = 0
+        var removedAdEvents = 0
+
+        for (track in allTracks) {
+            if (
+                track.rawTitle.isBlank() ||
+                AdAndPlaceholderFilter.isAdOrPlaceholder(track.rawTitle, track.rawArtist, track.album)
+            ) {
+                removedAdEvents += listenEventDao.countByTrackId(track.id)
+                trackDao.deleteById(track.id)
+                removedAdTracks++
+            }
+        }
+
+        removedAdEvents += listenEventDao.deleteZeroDurationEvents()
+
+        val (mergedDuplicates, updatedTracks) = renormalizeTracksInTransaction()
+
+        LibraryCleanupResult(
+            removedAdTracks = removedAdTracks,
+            removedAdEvents = removedAdEvents,
+            mergedDuplicateTracks = mergedDuplicates,
+            updatedTracks = updatedTracks
+        )
+    }
+
+    private suspend fun renormalizeTracksInTransaction(): Pair<Int, Int> {
+        val allTracks = trackDao.getAll()
+        if (allTracks.isEmpty()) return 0 to 0
 
         val recomputed = allTracks.associate { track ->
             track.id to normalizer.normalize(track.rawTitle, track.rawArtist)
@@ -130,7 +171,8 @@ class ListeningRepositoryImpl(
             recomputed.getValue(track.id).dedupKey
         }
 
-        var affectedCount = 0
+        var mergedDuplicates = 0
+        var updatedTracks = 0
         val survivorUpdates = mutableListOf<SurvivorUpdate>()
 
         // Phase 1: Merge colliding duplicates into the oldest (lowest ID) survivor
@@ -155,7 +197,7 @@ class ListeningRepositoryImpl(
                 }
                 listenEventDao.reassignTrackId(oldTrackId = dup.id, newTrackId = survivor.id)
                 trackDao.deleteById(dup.id)
-                affectedCount++
+                mergedDuplicates++
             }
 
             val targetEntity = survivor.copy(
@@ -189,10 +231,10 @@ class ListeningRepositoryImpl(
         // Phase 2b: Apply final normalized fields and dedup_keys
         for (update in survivorUpdates) {
             trackDao.update(update.target)
-            affectedCount++
+            updatedTracks++
         }
 
-        affectedCount
+        return mergedDuplicates to updatedTracks
     }
 
     private data class SurvivorUpdate(
