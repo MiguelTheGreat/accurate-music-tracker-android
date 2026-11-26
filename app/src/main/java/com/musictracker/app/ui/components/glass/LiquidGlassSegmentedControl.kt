@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.musictracker.app.ui.theme.LiquidGlassMetrics
 import com.musictracker.app.ui.theme.LiquidGlassMotion
+import com.musictracker.app.ui.theme.LiquidGlassOpticsTokens
 import com.musictracker.app.ui.theme.LiquidGlassShapes
 import com.musictracker.app.ui.theme.LiquidGlassTheme
 import kotlin.math.roundToInt
@@ -97,67 +98,92 @@ fun <T> LiquidGlassSegmentedControl(
         LiquidGlassMetrics.RimWidthStandard
     }
 
-    BoxWithConstraints(
+    val lensLightDirection = rememberLiquidGlassLightDirection(
+        enabled = !accessibility.reduceTransparency && !accessibility.reduceMotion
+    )
+
+    LiquidGlassSurface(
         modifier = modifier
             .fillMaxWidth()
-            .height(44.dp)
-            .clip(LiquidGlassShapes.ControlTrack)
-            .background(colors.controlTrackFill)
-            .border(trackBorderWidth, trackBorderColor, LiquidGlassShapes.ControlTrack)
-            .padding(LiquidGlassShapes.ControlTrackPadding)
+            .height(44.dp),
+        variant = LiquidGlassVariant.Regular,
+        shape = LiquidGlassShapes.ControlTrack,
+        interactive = true
     ) {
-        val segmentWidth = maxWidth / options.size
-
-        // Sliding Temporary Lift thumb
-        val thumbFill = when {
-            isLifted -> if (colors.isDark) Color.White.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.72f)
-            colors.isDark -> colors.standardCardElevatedFill
-            else -> colors.controlThumbSolid
-        }
-        val thumbBorderBrush = when {
-            accessibility.highContrast -> Brush.verticalGradient(
-                listOf(colors.rimBorderHighContrast, colors.rimBorderHighContrast)
-            )
-            isLifted -> Brush.verticalGradient(
-                listOf(colors.specularTopHighlight, colors.rimBorder, colors.specularBottomHighlight)
-            )
-            else -> Brush.verticalGradient(listOf(colors.standardCardBorder, colors.standardCardBorder))
-        }
-
-        Box(
-            modifier = Modifier
-                .width(segmentWidth)
-                .fillMaxHeight()
-                .offset {
-                    IntOffset(
-                        x = (animatedIndex * segmentWidth.toPx()).roundToInt(),
-                        y = 0
-                    )
-                }
-                .graphicsLayer {
-                    scaleX = thumbScaleX
-                    scaleY = thumbScaleY
-                }
-                .shadow(
-                    elevation = if (isLifted) 8.dp else 2.dp,
-                    shape = LiquidGlassShapes.ControlThumb,
-                    clip = false
-                )
-                .clip(LiquidGlassShapes.ControlThumb)
-                .background(thumbFill)
-                .border(
-                    width = if (isLifted || accessibility.highContrast) 1.25.dp else 0.75.dp,
-                    brush = thumbBorderBrush,
-                    shape = LiquidGlassShapes.ControlThumb
-                )
-        )
-
-        Row(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
-                .selectableGroup(),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(LiquidGlassShapes.ControlTrackPadding)
         ) {
+            val segmentWidth = maxWidth / options.size
+
+            // Sliding Temporary Lift thumb
+            val thumbFill = when {
+                isLifted -> if (colors.isDark) Color.White.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.72f)
+                colors.isDark -> colors.standardCardElevatedFill.copy(alpha = 0.72f)
+                else -> colors.controlThumbSolid.copy(alpha = 0.82f)
+            }
+            val thumbBorderBrush = when {
+                accessibility.highContrast -> Brush.verticalGradient(
+                    listOf(colors.rimBorderHighContrast, colors.rimBorderHighContrast)
+                )
+                isLifted -> Brush.verticalGradient(
+                    listOf(colors.specularTopHighlight, colors.rimBorder, colors.specularBottomHighlight)
+                )
+                else -> Brush.verticalGradient(listOf(colors.standardCardBorder, colors.standardCardBorder))
+            }
+
+            Box(
+                modifier = Modifier
+                    .width(segmentWidth)
+                    .fillMaxHeight()
+                    .offset {
+                        IntOffset(
+                            x = (animatedIndex * segmentWidth.toPx()).roundToInt(),
+                            y = 0
+                        )
+                    }
+                    .graphicsLayer {
+                        scaleX = thumbScaleX
+                        scaleY = thumbScaleY
+                    }
+                    .shadow(
+                        elevation = if (isLifted) 8.dp else 2.dp,
+                        shape = LiquidGlassShapes.ControlThumb,
+                        clip = false
+                    )
+                    .clip(LiquidGlassShapes.ControlThumb)
+                    .background(thumbFill)
+                    .border(
+                        width = if (isLifted || accessibility.highContrast) 1.25.dp else 0.75.dp,
+                        brush = thumbBorderBrush,
+                        shape = LiquidGlassShapes.ControlThumb
+                    )
+            )
+
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .liquidLensContent(
+                        enabled = !accessibility.reduceTransparency,
+                        optics = LiquidGlassOpticsTokens.ThumbLens,
+                        isDark = colors.isDark,
+                        lightDirection = lensLightDirection
+                    ) {
+                        val segW = segmentWidth.toPx()
+                        LiquidLensGeometry(
+                            left = animatedIndex * segW,
+                            top = 0f,
+                            width = segW,
+                            height = size.height,
+                            scaleX = thumbScaleX,
+                            scaleY = thumbScaleY,
+                            magnificationBoost = if (isLifted) 1.05f else 1f
+                        )
+                    }
+                    .selectableGroup(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
             options.forEachIndexed { index, option ->
                 val isSelected = option == selectedOption
                 val interactionSource = interactionSources[index]
@@ -189,6 +215,7 @@ fun <T> LiquidGlassSegmentedControl(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
+            }
             }
         }
     }

@@ -66,6 +66,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import com.musictracker.app.ui.theme.LiquidGlassMetrics
 import com.musictracker.app.ui.theme.LiquidGlassMotion
+import com.musictracker.app.ui.theme.LiquidGlassOpticsTokens
 import com.musictracker.app.ui.theme.LiquidGlassShapes
 import com.musictracker.app.ui.theme.LiquidGlassTheme
 import kotlin.math.abs
@@ -516,9 +517,38 @@ fun LiquidGlassNavBar(
                     }
             )
 
-            // Foreground tab items
+            val lensLightDirection = rememberLiquidGlassLightDirection(
+                enabled = !accessibility.reduceTransparency && !accessibility.reduceMotion
+            )
+
+            // Foreground tab items — magnified through the AGSL lens beneath the sliding pill
             Row(
-                modifier = Modifier.selectableGroup(),
+                modifier = Modifier
+                    .liquidLensContent(
+                        enabled = !accessibility.reduceTransparency,
+                        optics = LiquidGlassOpticsTokens.NavLens,
+                        isDark = colors.isDark,
+                        lightDirection = lensLightDirection
+                    ) {
+                        val stridePx = (tabWidth + tabGap).toPx()
+                        val travelStretch = if (accessibility.reduceMotion) {
+                            0f
+                        } else {
+                            abs(animatedLensIndexState.value - targetLensFloat)
+                                .coerceIn(0f, 1f) * 0.14f
+                        }
+                        val boost = 1f + (lensGlowAlphaState.value * 0.08f)
+                        LiquidLensGeometry(
+                            left = animatedLensIndexState.value * stridePx,
+                            top = 0f,
+                            width = tabWidth.toPx(),
+                            height = size.height,
+                            scaleX = lensScaleXState.value + travelStretch,
+                            scaleY = lensScaleYState.value - (travelStretch * 0.25f),
+                            magnificationBoost = boost
+                        )
+                    }
+                    .selectableGroup(),
                 horizontalArrangement = Arrangement.spacedBy(tabGap),
                 verticalAlignment = Alignment.CenterVertically
             ) {

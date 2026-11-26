@@ -143,6 +143,83 @@ object LiquidGlassMetrics {
     const val MinSafeBlurRadiusPx: Float = 0.5f
 }
 
+/**
+ * Optical parameters for the true Liquid Glass refraction pipeline:
+ * light blur → AGSL lens/refraction shader → saturation color filter.
+ *
+ * - [blurRadius]: API 33+ pre-refraction blur (kept tiny so the backdrop stays legible).
+ * - [legacyBlurRadius] / [legacySaturation]: API 31–32 blur-only tier.
+ * - [refraction]: max inward displacement of backdrop samples at the rim.
+ * - [edgeThickness]: width of the curved "thick glass rim" band; the center stays flat.
+ * - [dispersion]: extra R/B channel offset at the rim (chromatic dispersion, ~1–2px).
+ * - [specularIntensity]: brightness of the rim glints (primary light + softer opposite bounce).
+ * - [tintAlphaScale]: multiplier applied to the glass tint fill alpha.
+ * - [luminanceAdaptation]: 0..1 pull of backdrop luminance toward mid-grey for legibility.
+ * - [magnification]: center magnification (1 = none). Used by the sliding lens pills.
+ */
+@Immutable
+data class LiquidGlassOptics(
+    val blurRadius: Dp,
+    val legacyBlurRadius: Dp,
+    val refraction: Dp,
+    val edgeThickness: Dp,
+    val dispersion: Dp,
+    val specularIntensity: Float,
+    val saturation: Float,
+    val legacySaturation: Float,
+    val tintAlphaScale: Float,
+    val luminanceAdaptation: Float,
+    val magnification: Float = 1f
+)
+
+object LiquidGlassOpticsTokens {
+    val Regular = LiquidGlassOptics(
+        blurRadius = 3.dp,
+        legacyBlurRadius = 9.dp,
+        refraction = 12.dp,
+        edgeThickness = 20.dp,
+        dispersion = 0.6.dp,
+        specularIntensity = 0.55f,
+        saturation = 1.45f,
+        legacySaturation = 1.6f,
+        tintAlphaScale = 0.45f,
+        luminanceAdaptation = 0.14f
+    )
+
+    val Clear = LiquidGlassOptics(
+        blurRadius = 1.5.dp,
+        legacyBlurRadius = 5.dp,
+        refraction = 16.dp,
+        edgeThickness = 24.dp,
+        dispersion = 0.8.dp,
+        specularIntensity = 0.7f,
+        saturation = 1.3f,
+        legacySaturation = 1.45f,
+        tintAlphaScale = 0.3f,
+        luminanceAdaptation = 0.06f
+    )
+
+    /** Sliding nav-bar lens pill: no blur, strong magnification of the icons beneath. */
+    val NavLens = LiquidGlassOptics(
+        blurRadius = 0.dp,
+        legacyBlurRadius = 0.dp,
+        refraction = 7.dp,
+        edgeThickness = 14.dp,
+        dispersion = 0.7.dp,
+        specularIntensity = 0.8f,
+        saturation = 1.15f,
+        legacySaturation = 1f,
+        tintAlphaScale = 0.6f,
+        luminanceAdaptation = 0f,
+        magnification = 1.18f
+    )
+
+    /** Segmented-control thumb lens: gentler magnification. */
+    val ThumbLens = NavLens.copy(refraction = 5.dp, edgeThickness = 10.dp, magnification = 1.10f)
+
+    fun forVariant(isClear: Boolean): LiquidGlassOptics = if (isClear) Clear else Regular
+}
+
 object LiquidGlassMotion {
     val SpringFluid = spring<Float>(dampingRatio = 0.78f, stiffness = 380f)
     val SpringBounce = spring<Float>(dampingRatio = 0.58f, stiffness = 420f)
