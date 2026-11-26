@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.musictracker.app.data.export.DataExporter
 import com.musictracker.app.data.preferences.AccessibilityPreferencesStore
 import com.musictracker.app.data.preferences.AllowlistRepository
+import com.musictracker.app.data.preferences.ArtworkPreferencesStore
 import com.musictracker.app.di.AppContainer
 import com.musictracker.app.domain.model.ExportResult
 import com.musictracker.app.tracking.InstalledAppInfo
@@ -18,6 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -29,7 +31,9 @@ class SettingsViewModel(
     private val reduceTransparencyFlow: Flow<Boolean>,
     private val setReduceTransparency: suspend (Boolean) -> Unit,
     private val dataExporter: DataExporter,
-    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val onlineArtworkEnabledFlow: Flow<Boolean> = flowOf(true),
+    private val setOnlineArtworkEnabled: suspend (Boolean) -> Unit = {}
 ) : ViewModel() {
 
     constructor(
@@ -37,7 +41,8 @@ class SettingsViewModel(
         allowlistRepository: AllowlistRepository,
         accessibilityPreferencesStore: AccessibilityPreferencesStore,
         dataExporter: DataExporter,
-        ioDispatcher: CoroutineDispatcher = Dispatchers.IO
+        ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+        artworkPreferencesStore: ArtworkPreferencesStore? = null
     ) : this(
         systemPermissionHelper = systemPermissionHelper,
         allowlistRepository = allowlistRepository,
@@ -46,7 +51,11 @@ class SettingsViewModel(
             accessibilityPreferencesStore.setReduceTransparencyEnabled(enabled)
         },
         dataExporter = dataExporter,
-        ioDispatcher = ioDispatcher
+        ioDispatcher = ioDispatcher,
+        onlineArtworkEnabledFlow = artworkPreferencesStore?.onlineArtworkEnabled ?: flowOf(true),
+        setOnlineArtworkEnabled = { enabled ->
+            artworkPreferencesStore?.setOnlineArtworkEnabled(enabled)
+        }
     )
 
     private val isNotificationAccessGrantedFlow = MutableStateFlow(
@@ -94,6 +103,11 @@ class SettingsViewModel(
         val searchQuery: String
     )
 
+    private data class PreferenceTogglesSnapshot(
+        val reduceTransparency: Boolean,
+        val onlineArtworkEnabled: Boolean
+    )
+
     private val systemStatusFlow = combine(
         isNotificationAccessGrantedFlow,
         isIgnoringBatteryOptimizationsFlow,
@@ -102,13 +116,23 @@ class SettingsViewModel(
         SystemStatusSnapshot(hasNotif, isIgnoringBattery, query)
     }
 
+    private val preferenceTogglesFlow = combine(
+        reduceTransparencyFlow,
+        onlineArtworkEnabledFlow
+    ) { reduceTransparency, onlineArtwork ->
+        PreferenceTogglesSnapshot(
+            reduceTransparency = reduceTransparency,
+            onlineArtworkEnabled = onlineArtwork
+        )
+    }
+
     val uiState: StateFlow<SettingsUiState> = combine(
         systemStatusFlow,
         filteredAppsFlow,
         isLoadingAppsFlow,
         exportStateFlow,
-        reduceTransparencyFlow
-    ) { status, filteredApps, isLoadingApps, exportState, reduceTransparency ->
+        preferenceTogglesFlow
+    ) { status, filteredApps, isLoadingApps, exportState, toggles ->
         SettingsUiState(
             isNotificationAccessGranted = status.hasNotifAccess,
             isIgnoringBatteryOptimizations = status.isIgnoringBattery,
@@ -116,7 +140,8 @@ class SettingsViewModel(
             filteredApps = filteredApps,
             isLoadingApps = isLoadingApps,
             exportState = exportState,
-            reduceTransparencyEnabled = reduceTransparency
+            reduceTransparencyEnabled = toggles.reduceTransparency,
+            onlineArtworkEnabled = toggles.onlineArtworkEnabled
         )
     }.stateIn(
         scope = viewModelScope,
@@ -162,6 +187,12 @@ class SettingsViewModel(
     fun onToggleReduceTransparency(enabled: Boolean) {
         viewModelScope.launch {
             setReduceTransparency(enabled)
+        }
+    }
+
+    fun onToggleOnlineArtwork(enabled: Boolean) {
+        viewModelScope.launch {
+            setOnlineArtworkEnabled(enabled)
         }
     }
 
@@ -243,7 +274,8 @@ class SettingsViewModel(
                         allowlistRepository = appContainer.allowlistRepository,
                         accessibilityPreferencesStore = appContainer.accessibilityPreferencesStore,
                         dataExporter = appContainer.dataExporter,
-                        ioDispatcher = appContainer.ioDispatcher
+                        ioDispatcher = appContainer.ioDispatcher,
+                        artworkPreferencesStore = appContainer.artworkPreferencesStore
                     ) as T
                 }
             }

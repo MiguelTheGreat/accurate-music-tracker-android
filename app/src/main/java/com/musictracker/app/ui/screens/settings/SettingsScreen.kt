@@ -136,6 +136,7 @@ fun SettingsRoute(
         },
         onDismissExportFeedback = viewModel::clearExportFeedback,
         onToggleReduceTransparency = viewModel::onToggleReduceTransparency,
+        onToggleOnlineArtwork = viewModel::onToggleOnlineArtwork,
         modifier = modifier
     )
 }
@@ -151,7 +152,8 @@ fun SettingsScreenContent(
     onExportSqliteClick: () -> Unit,
     onDismissExportFeedback: () -> Unit,
     onToggleReduceTransparency: (Boolean) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onToggleOnlineArtwork: (Boolean) -> Unit = {}
 ) {
     val colors = LiquidGlassTheme.colors
     val accessibility = LiquidGlassTheme.accessibility
@@ -376,7 +378,44 @@ fun SettingsScreenContent(
             }
         }
 
-        // Section 4: App Allowlist Manager
+        // Section 4: Artwork & Artist Photos
+        item(key = "settings_artwork_section") {
+            SettingsSectionTitle(text = "Artwork & Photos")
+            Spacer(modifier = Modifier.height(8.dp))
+            StandardMaterialCard(
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(
+                            text = "Online Artwork & Artist Photos",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = colors.labelPrimary
+                        )
+                        Text(
+                            text = "Fetch artist photos and missing album art online, then cache locally for offline use.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.labelSecondary
+                        )
+                    }
+                    LiquidGlassSwitch(
+                        checked = uiState.onlineArtworkEnabled,
+                        onCheckedChange = onToggleOnlineArtwork,
+                        modifier = Modifier.testTag("settings_online_artwork_switch")
+                    )
+                }
+            }
+        }
+
+        // Section 5: App Allowlist Manager
         item(key = "settings_allowlist_header") {
             SettingsSectionTitle(text = "App Allowlist")
             Spacer(modifier = Modifier.height(8.dp))

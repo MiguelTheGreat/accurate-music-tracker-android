@@ -6,6 +6,11 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStoreFile
 import androidx.room.Room
+import com.musictracker.app.data.artwork.ArtworkCacheManager
+import com.musictracker.app.data.artwork.ArtworkHttpClient
+import com.musictracker.app.data.artwork.ArtworkRepository
+import com.musictracker.app.data.artwork.OnlineArtworkFetcher
+import com.musictracker.app.data.artwork.UrlConnectionArtworkHttpClient
 import com.musictracker.app.data.clock.SystemTrackerClock
 import com.musictracker.app.data.db.MusicTrackerDatabase
 import com.musictracker.app.data.export.DataExporter
@@ -13,6 +18,7 @@ import com.musictracker.app.data.export.DataExporterImpl
 import com.musictracker.app.data.preferences.AccessibilityPreferencesStore
 import com.musictracker.app.data.preferences.AllowlistRepository
 import com.musictracker.app.data.preferences.AllowlistStore
+import com.musictracker.app.data.preferences.ArtworkPreferencesStore
 import com.musictracker.app.data.repository.ListeningRepository
 import com.musictracker.app.data.repository.ListeningRepositoryImpl
 import com.musictracker.app.domain.clock.TrackerClock
@@ -78,6 +84,32 @@ class AppContainer(
         AccessibilityPreferencesStore(dataStore = preferencesDataStore)
     }
 
+    val artworkPreferencesStore: ArtworkPreferencesStore by lazy {
+        ArtworkPreferencesStore(dataStore = preferencesDataStore)
+    }
+
+    val artworkHttpClient: ArtworkHttpClient by lazy {
+        UrlConnectionArtworkHttpClient(ioDispatcher = ioDispatcher)
+    }
+
+    val artworkCacheManager: ArtworkCacheManager by lazy {
+        ArtworkCacheManager(context = appContext)
+    }
+
+    val onlineArtworkFetcher: OnlineArtworkFetcher by lazy {
+        OnlineArtworkFetcher(httpClient = artworkHttpClient)
+    }
+
+    val artworkRepository: ArtworkRepository by lazy {
+        ArtworkRepository(
+            cacheManager = artworkCacheManager,
+            onlineFetcher = onlineArtworkFetcher,
+            onlineArtworkEnabledFlow = artworkPreferencesStore.onlineArtworkEnabled,
+            contentResolver = appContext.contentResolver,
+            ioDispatcher = ioDispatcher
+        )
+    }
+
     val dataExporter: DataExporter by lazy {
         DataExporterImpl(
             database = database,
@@ -98,7 +130,9 @@ class AppContainer(
             clock = clock,
             scope = applicationScope,
             ioDispatcher = ioDispatcher,
-            schedulerDispatcher = schedulerDispatcher
+            schedulerDispatcher = schedulerDispatcher,
+            artworkRepository = artworkRepository,
+            metadataNormalizer = metadataNormalizer
         )
     }
 

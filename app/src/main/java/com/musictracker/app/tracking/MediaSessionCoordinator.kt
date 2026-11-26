@@ -6,6 +6,7 @@ import android.media.session.PlaybackState
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import com.musictracker.app.data.artwork.ArtworkRepository
 import com.musictracker.app.data.preferences.AllowlistRepository
 import com.musictracker.app.data.preferences.DefaultAllowlist
 import com.musictracker.app.data.repository.ListeningRepository
@@ -16,6 +17,8 @@ import com.musictracker.app.domain.model.NowTrackingState
 import com.musictracker.app.domain.model.PlaybackEvent
 import com.musictracker.app.domain.model.PlaybackStateSnapshot
 import com.musictracker.app.domain.model.PlaybackStatus
+import com.musictracker.app.domain.normalization.MetadataNormalizer
+import com.musictracker.app.domain.normalization.MusicMetadataNormalizer
 import com.musictracker.app.domain.tracking.PlaySessionEngine
 import com.musictracker.app.domain.tracking.PlaySessionStateMachine
 import kotlinx.coroutines.CancellationException
@@ -32,6 +35,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.util.concurrent.ConcurrentHashMap
 
 interface TrackedMediaController {
     val tokenId: Any
@@ -50,7 +54,8 @@ interface TrackedMediaController {
 
 class AndroidMediaControllerAdapter(
     private val controller: MediaController,
-    private val callbackHandler: Handler? = Handler(Looper.getMainLooper())
+    private val callbackHandler: Handler? = Handler(Looper.getMainLooper()),
+    private val onArtworkMetadata: ((MediaMetadata, MediaMetadataSnapshot) -> Unit)? = null
 ) : TrackedMediaController {
 
     private var registeredCallback: MediaController.Callback? = null
@@ -62,7 +67,11 @@ class AndroidMediaControllerAdapter(
         get() = controller.packageName.orEmpty()
 
     override val currentMetadata: MediaMetadataSnapshot?
-        get() = controller.metadata?.toDomainSnapshot()
+        get() = controller.metadata?.let { raw ->
+            val snapshot = raw.toDomainSnapshot()
+            onArtworkMetadata?.invoke(raw, snapshot)
+            snapshot
+        }
 
     override val currentPlaybackState: PlaybackStateSnapshot?
         get() = controller.playbackState?.toDomainSnapshot()
@@ -71,7 +80,11 @@ class AndroidMediaControllerAdapter(
         unregisterCallback()
         val callback = object : MediaController.Callback() {
             override fun onMetadataChanged(metadata: MediaMetadata?) {
-                listener.onMetadataChanged(metadata?.toDomainSnapshot())
+                val snapshot = metadata?.toDomainSnapshot()
+                if (metadata != null && snapshot != null) {
+                    onArtworkMetadata?.invoke(metadata, snapshot)
+                }
+                listener.onMetadataChanged(snapshot)
             }
 
             override fun onPlaybackStateChanged(state: PlaybackState?) {
@@ -177,7 +190,9 @@ class MediaSessionCoordinator(
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val schedulerDispatcher: CoroutineDispatcher = Dispatchers.Default,
     private val debounceMs: Long = PlaySessionStateMachine.DEFAULT_DEBOUNCE_MS,
-    private val idlePauseTimeoutMs: Long = PlaySessionStateMachine.DEFAULT_IDLE_PAUSE_TIMEOUT_MS
+    private val idlePauseTimeoutMs: Long = PlaySessionStateMachine.DEFAULT_IDLE_PAUSE_TIMEOUT_MS,
+    private val artworkRepository: ArtworkRepository? = null,
+    private val metadataNormalizer: MetadataNormalizer = MusicMetadataNormalizer()
 ) {
 
     private data class AttachedEntry(
@@ -188,6 +203,7 @@ class MediaSessionCoordinator(
 
     private val stateLock = Any()
     private val persistenceMutex = Mutex()
+    private val inFlightArtworkCaptures = ConcurrentHashMap.newKeySet<String>()
 
     private val _isListenerConnected = MutableStateFlow(false)
     val isListenerConnected: StateFlow<Boolean> = _isListenerConnected.asStateFlow()
@@ -227,13 +243,50 @@ class MediaSessionCoordinator(
         controllers: List<MediaController>?,
         callbackHandler: Handler? = Handler(Looper.getMainLooper())
     ) {
+        val artworkCallback: ((MediaMetadata, MediaMetadataSnapshot) -> Unit)? =
+            if (artworkRepository != null) ::captureArtworkIfUncached else null
         val adapted = controllers.orEmpty().map { controller ->
             AndroidMediaControllerAdapter(
                 controller = controller,
-                callbackHandler = callbackHandler
+                callbackHandler = callbackHandler,
+                onArtworkMetadata = artworkCallback
             )
         }
         onActiveSessionsChanged(adapted)
+    }
+
+    private fun captureArtworkIfUncached(
+        rawMetadata: MediaMetadata,
+        snapshot: MediaMetadataSnapshot
+    ) {
+        val repo = artworkRepository ?: return
+        if (snapshot.title.isBlank()) return
+        val dedupKey = metadataNormalizer.normalize(snapshot.title, snapshot.artist).dedupKey
+        if (dedupKey.isBlank()) return
+        if (repo.getCachedTrackArtworkFile(dedupKey) != null) return
+
+        val bitmap = runCatching {
+            rawMetadata.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
+                ?: rawMetadata.getBitmap(MediaMetadata.METADATA_KEY_ART)
+                ?: rawMetadata.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON)
+        }.getOrNull() ?: return
+
+        if (bitmap.isRecycled) return
+        if (!inFlightArtworkCaptures.add(dedupKey)) return
+
+        scope.launch(ioDispatcher) {
+            try {
+                repo.saveTrackArtworkBitmap(dedupKey, bitmap)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (t: Throwable) {
+                runCatching {
+                    Log.w(TAG, "Failed to cache playback artwork bitmap", t)
+                }
+            } finally {
+                inFlightArtworkCaptures.remove(dedupKey)
+            }
+        }
     }
 
     fun onActiveSessionsChanged(controllers: List<TrackedMediaController>) {
