@@ -25,8 +25,12 @@ class StatsViewModel(
 ) : ViewModel() {
 
     private val selectedTimeframeFlow = MutableStateFlow(StatsTimeframe.TODAY)
+    private val refreshTickFlow = MutableStateFlow(0L)
 
-    val uiState: StateFlow<StatsUiState> = selectedTimeframeFlow.flatMapLatest { timeframe ->
+    val uiState: StateFlow<StatsUiState> = combine(
+        selectedTimeframeFlow,
+        refreshTickFlow
+    ) { timeframe, _ -> timeframe }.flatMapLatest { timeframe ->
         val sinceEpochMs = computeTimeframeSinceEpochMs(
             timeframe = timeframe,
             nowEpochMs = clock.currentTimeMillis(),
@@ -53,6 +57,10 @@ class StatsViewModel(
 
     fun selectTimeframe(timeframe: StatsTimeframe) {
         selectedTimeframeFlow.value = timeframe
+    }
+
+    fun refresh() {
+        refreshTickFlow.value += 1L
     }
 
     companion object {

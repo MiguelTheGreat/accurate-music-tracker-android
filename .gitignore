@@ -3,6 +3,7 @@
 
 # Gradle & Build outputs
 .gradle/
+.kotlin/
 build/
 app/build/
 captures/

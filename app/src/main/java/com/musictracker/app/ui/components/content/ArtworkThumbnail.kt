@@ -20,7 +20,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.musictracker.app.ui.theme.LiquidGlassShapes
-import kotlin.math.abs
 
 private val ArtworkGradientPalettes: List<Pair<Color, Color>> = listOf(
     Color(0xFF1D4ED8) to Color(0xFF7C3AED),
@@ -38,7 +37,7 @@ private val ArtworkGradientPalettes: List<Pair<Color, Color>> = listOf(
  * Also used by the "Now Tracking" card for ambient backdrop & luminance estimation.
  */
 fun deterministicArtworkColors(seed: String): Pair<Color, Color> {
-    val index = abs(seed.hashCode()) % ArtworkGradientPalettes.size
+    val index = Math.floorMod(seed.hashCode(), ArtworkGradientPalettes.size)
     return ArtworkGradientPalettes[index]
 }
 

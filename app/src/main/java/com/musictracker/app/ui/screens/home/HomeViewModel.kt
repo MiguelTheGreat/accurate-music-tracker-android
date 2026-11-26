@@ -64,7 +64,11 @@ class HomeViewModel(
     )
 
     fun refreshPermissionAndDay() {
-        isNotificationAccessGrantedFlow.value = systemPermissionHelper.isNotificationAccessGranted()
+        val hasAccess = systemPermissionHelper.isNotificationAccessGranted()
+        isNotificationAccessGrantedFlow.value = hasAccess
+        if (hasAccess) {
+            isBannerDismissedFlow.value = false
+        }
         todayStartEpochMsFlow.value = startOfTodayEpochMs(clock.currentTimeMillis(), zoneId)
     }
 

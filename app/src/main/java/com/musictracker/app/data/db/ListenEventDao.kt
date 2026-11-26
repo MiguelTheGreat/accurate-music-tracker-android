@@ -90,7 +90,7 @@ interface ListenEventDao {
         FROM listen_events e
         INNER JOIN tracks t ON e.track_id = t.id
         WHERE e.started_at_epoch >= :sinceEpochMs
-        GROUP BY LOWER(t.normalized_artist)
+        GROUP BY CASE WHEN INSTR(t.dedup_key, '::') > 1 THEN SUBSTR(t.dedup_key, 1, INSTR(t.dedup_key, '::') - 1) ELSE LOWER(t.normalized_artist) END
         ORDER BY totalListenedMs DESC, playCount DESC, artist ASC
         LIMIT :limit
         """

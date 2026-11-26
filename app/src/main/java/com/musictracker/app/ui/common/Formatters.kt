@@ -44,8 +44,8 @@ fun formatLiveCounter(durationMs: Long): String {
  */
 fun formatSummaryDuration(durationMs: Long): String {
     val clamped = durationMs.coerceAtLeast(0L)
-    if (clamped == 0L) return "0m"
     val totalSeconds = clamped / MILLIS_PER_SECOND
+    if (totalSeconds == 0L) return "0m"
     val hours = totalSeconds / 3600
     val minutes = (totalSeconds % 3600) / 60
     val seconds = totalSeconds % 60
@@ -73,10 +73,10 @@ fun formatEventDuration(durationMs: Long): String {
 }
 
 /**
- * Formats skip rate percentage (`"12%"`), or `"—"` when [playCount] is 0.
+ * Formats skip rate percentage (`"12%"`), or `"—"` when [playCount] is 0 or [skipRate] is NaN.
  */
 fun formatSkipRate(playCount: Int, skipRate: Float): String {
-    if (playCount <= 0) return "—"
+    if (playCount <= 0 || skipRate.isNaN()) return "—"
     val percent = (skipRate.coerceIn(0f, 1f) * 100f).roundToInt()
     return "$percent%"
 }

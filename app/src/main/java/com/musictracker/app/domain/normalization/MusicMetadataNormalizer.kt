@@ -140,10 +140,9 @@ class MusicMetadataNormalizer : MetadataNormalizer {
             val decomposed = Normalizer.normalize(value, Normalizer.Form.NFD)
             val withoutDiacritics = COMBINING_MARKS_REGEX.replace(decomposed, "")
             val recomposed = Normalizer.normalize(withoutDiacritics, Normalizer.Form.NFC)
-            return recomposed
-                .lowercase(Locale.ROOT)
-                .replace(NON_ALNUM_REGEX, " ")
-                .trim()
+            val lower = recomposed.lowercase(Locale.ROOT)
+            val stripped = lower.replace(NON_ALNUM_REGEX, " ").trim()
+            return stripped.ifEmpty { lower.trim() }
         }
     }
 }

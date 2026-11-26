@@ -1,5 +1,6 @@
 package com.musictracker.app.ui.screens.settings
 
+import android.content.ActivityNotFoundException
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -111,13 +112,27 @@ fun SettingsRoute(
             val timestamp = ExportTimestampFormatter.format(
                 Instant.now().atZone(ZoneId.systemDefault())
             )
-            jsonExportLauncher.launch("music-tracker-export-$timestamp.json")
+            try {
+                jsonExportLauncher.launch("music-tracker-export-$timestamp.json")
+            } catch (_: ActivityNotFoundException) {
+                viewModel.reportExportError(
+                    ExportFormat.JSON,
+                    "No file manager available to save export"
+                )
+            }
         },
         onExportSqliteClick = {
             val timestamp = ExportTimestampFormatter.format(
                 Instant.now().atZone(ZoneId.systemDefault())
             )
-            sqliteExportLauncher.launch("music-tracker-backup-$timestamp.db")
+            try {
+                sqliteExportLauncher.launch("music-tracker-backup-$timestamp.db")
+            } catch (_: ActivityNotFoundException) {
+                viewModel.reportExportError(
+                    ExportFormat.SQLITE,
+                    "No file manager available to save export"
+                )
+            }
         },
         onDismissExportFeedback = viewModel::clearExportFeedback,
         onToggleReduceTransparency = viewModel::onToggleReduceTransparency,
@@ -536,7 +551,8 @@ private fun AllowlistAppRow(
                         style = MaterialTheme.typography.titleSmall,
                         color = colors.labelPrimary,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
                     if (app.isDefaultMusicApp) {
                         Box(

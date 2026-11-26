@@ -36,6 +36,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.musictracker.app.domain.model.ListeningSummary
 import com.musictracker.app.domain.model.StatsTimeframe
@@ -60,6 +62,10 @@ fun StatsRoute(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        viewModel.refresh()
+    }
 
     StatsScreenContent(
         uiState = uiState,
@@ -383,7 +389,13 @@ private fun TopArtistRow(
     )
     val avatarColors = remember(artist.artist) { deterministicArtworkColors(artist.artist) }
     val monogram = remember(artist.artist) {
-        artist.artist.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?"
+        val trimmed = artist.artist.trim()
+        if (trimmed.isEmpty()) {
+            "?"
+        } else {
+            val cp = trimmed.codePointAt(0)
+            String(Character.toChars(Character.toUpperCase(cp)))
+        }
     }
     val playLabel = if (artist.playCount == 1) "1 play" else "${artist.playCount} plays"
     val trackLabel = if (artist.uniqueTrackCount == 1) "1 track" else "${artist.uniqueTrackCount} tracks"

@@ -5,6 +5,7 @@ import android.media.session.MediaController
 import android.media.session.PlaybackState
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import com.musictracker.app.data.preferences.AllowlistRepository
 import com.musictracker.app.data.preferences.DefaultAllowlist
 import com.musictracker.app.data.repository.ListeningRepository
@@ -17,6 +18,7 @@ import com.musictracker.app.domain.model.PlaybackStateSnapshot
 import com.musictracker.app.domain.model.PlaybackStatus
 import com.musictracker.app.domain.tracking.PlaySessionEngine
 import com.musictracker.app.domain.tracking.PlaySessionStateMachine
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -323,8 +325,7 @@ class MediaSessionCoordinator(
                 focusedTokenId = candidate.key
                 if (
                     candidate.value.cachedMetadata?.title.isNullOrBlank() &&
-                    previousFocused != null &&
-                    previousFocused.controller.packageName != candidate.value.controller.packageName
+                    previousFocused != null
                 ) {
                     emitted += playSessionEngine.onSessionEnded(previousFocused.controller.packageName)
                 }
@@ -406,8 +407,7 @@ class MediaSessionCoordinator(
                 focusedTokenId = tokenId
                 if (
                     entry.cachedMetadata?.title.isNullOrBlank() &&
-                    previousFocused != null &&
-                    previousFocused.controller.packageName != entry.controller.packageName
+                    previousFocused != null
                 ) {
                     results += playSessionEngine.onSessionEnded(previousFocused.controller.packageName)
                 }
@@ -525,7 +525,15 @@ class MediaSessionCoordinator(
         if (sessions.isEmpty()) return
         persistenceMutex.withLock {
             for (session in sessions) {
-                listeningRepository.recordCompletedSession(session)
+                try {
+                    listeningRepository.recordCompletedSession(session)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (t: Throwable) {
+                    runCatching {
+                        Log.e(TAG, "Failed to persist completed listen session", t)
+                    }
+                }
             }
         }
     }
@@ -536,5 +544,9 @@ class MediaSessionCoordinator(
         PlaybackStatus.ERROR -> true
 
         else -> false
+    }
+
+    companion object {
+        private const val TAG = "MediaSessionCoordinator"
     }
 }

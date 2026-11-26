@@ -124,8 +124,8 @@ Every Survey feature is assigned a Milestone (zero unassigned):
 | M2 | Play-Session State Machine & Metadata Normalizer | F09, F10, F11, F12, F13, F14, F15, F16, F17, F18 (logic) + exhaustive JVM unit tests | M1 | DONE (64/64 tests pass, CLEAN audit) |
 | M3 | Core Tracking Engine (`NotificationListenerService` + `MediaSessionManager`) | F01, F02, F03, F04, F05, F06, F08 + Robolectric service/coordinator/DB integration tests | M1, M2 | DONE (89/89 tests pass, lintDebug pass, CLEAN audit) |
 | M4 | Liquid Glass Design System & Jetpack Compose UI | F21 (UI SAF), F22 (UI SAF), F23, F24, F25, F26 + ViewModel & Robolectric Compose UI tests | M1, M2, M3 | DONE (110/110 tests pass, lintDebug 0 errors, CLEAN audit) |
-| E2E | E2E Testing Track (Opaque-Box Tiers 1–4) | Independent requirement-driven 4-tier test suite (`TEST_INFRA.md`, `app/src/test/java/com/musictracker/app/e2e/`, `TEST_READY.md`) | M1 (for Gradle execution; design starts immediately) | PHASE_A_DONE (ready for Phase B after M4 release) |
-| M5 | Final Milestone (E2E Pass + Tier 5 Hardening) | Phase 1: pass 100% E2E Tiers 1–4; Phase 2: Tier 5 adversarial white-box hardening | M4, E2E (`TEST_READY.md`) | PLANNED |
+| E2E | E2E Testing Track (Opaque-Box Tiers 1–4) | Independent requirement-driven 4-tier test suite (`TEST_INFRA.md`, `app/src/test/java/com/musictracker/app/e2e/`, `TEST_READY.md`) | M1 (for Gradle execution; design starts immediately) | DONE (74/74 E2E tests pass, 19 suites, CLEAN audit, `TEST_READY.md` published) |
+| M5 | Final Milestone (E2E Pass + Tier 5 Hardening + README) | Phase 1: pass 100% unit + Robolectric + E2E Tiers 1–4 + lintDebug + assembleDebug; Phase 2: Tier 5 adversarial white-box hardening; comprehensive `README.md` | M4, E2E (`TEST_READY.md`) | DONE (38 suites / 204 tests pass `--rerun`, 0 lint errors, 19M APK, 15 Tier-5 fixes + 20 Tier-5 tests + `README.md`, CLEAN whole-project audit) |
 
 ---
 

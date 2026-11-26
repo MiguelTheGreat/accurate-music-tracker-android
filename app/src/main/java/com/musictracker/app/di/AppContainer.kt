@@ -23,7 +23,9 @@ import com.musictracker.app.domain.tracking.PlaySessionStateMachine
 import com.musictracker.app.tracking.AndroidSystemPermissionHelper
 import com.musictracker.app.tracking.MediaSessionCoordinator
 import com.musictracker.app.tracking.SystemPermissionHelper
+import android.util.Log
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -39,7 +41,11 @@ class AppContainer(
     ),
     val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     val schedulerDispatcher: CoroutineDispatcher = Dispatchers.Default,
-    val applicationScope: CoroutineScope = CoroutineScope(SupervisorJob() + schedulerDispatcher)
+    val applicationScope: CoroutineScope = CoroutineScope(
+        SupervisorJob() + schedulerDispatcher + CoroutineExceptionHandler { _, throwable ->
+            runCatching { Log.e(TAG, "Uncaught coroutine exception", throwable) }
+        }
+    )
 ) {
     private val appContext = context.applicationContext
 
@@ -100,6 +106,7 @@ class AppContainer(
         get() = mediaSessionCoordinator.isListenerConnected
 
     companion object {
+        private const val TAG = "AppContainer"
         private const val PREFERENCES_FILE_NAME = "music_tracker_prefs"
     }
 }

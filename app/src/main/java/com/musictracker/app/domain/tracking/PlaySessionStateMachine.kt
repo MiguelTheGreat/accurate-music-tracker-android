@@ -238,9 +238,15 @@ class PlaySessionStateMachine(
                 )
             }
             if (incomingIdentity != null && incomingIdentity != session.identity) {
+                val shouldStartPlaying = if (state != null) {
+                    state.status == PlaybackStatus.PLAYING
+                } else {
+                    session.segmentStartElapsedMs != null ||
+                        latestStateByPackage[pkg]?.status == PlaybackStatus.PLAYING
+                }
                 finalizeOrDiscardCurrent(now, isLoopRestart = false, emitted = emitted)
-                if (state?.status == PlaybackStatus.PLAYING) {
-                    startNewSession(pkg, validMeta, initialPosMs = state.positionMs, now = now)
+                if (shouldStartPlaying) {
+                    startNewSession(pkg, validMeta, initialPosMs = state?.positionMs ?: 0L, now = now)
                 }
             } else {
                 if (validMeta != null) {
@@ -331,7 +337,7 @@ class PlaySessionStateMachine(
         if (newPos > LOOP_START_WINDOW_MS) return false
 
         val prevPos = session.lastPlayingPositionMs
-        val nearEnd = prevPos >= (dur - LOOP_END_WINDOW_MS).coerceAtLeast(0L) ||
+        val nearEnd = (dur > LOOP_END_WINDOW_MS && prevPos >= dur - LOOP_END_WINDOW_MS) ||
             prevPos.toDouble() / dur.toDouble() >= LOOP_END_RATIO
         if (!nearEnd) return false
 

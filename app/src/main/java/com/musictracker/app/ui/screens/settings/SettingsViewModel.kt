@@ -10,6 +10,7 @@ import com.musictracker.app.di.AppContainer
 import com.musictracker.app.domain.model.ExportResult
 import com.musictracker.app.tracking.InstalledAppInfo
 import com.musictracker.app.tracking.SystemPermissionHelper
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -182,6 +183,13 @@ class SettingsViewModel(
         }
     }
 
+    fun reportExportError(format: ExportFormat, message: String) {
+        exportStateFlow.value = ExportUiState.Error(
+            format = format,
+            message = message
+        )
+    }
+
     private fun runExport(
         format: ExportFormat,
         openOutputStream: () -> OutputStream?,
@@ -199,6 +207,7 @@ class SettingsViewModel(
                         exporterAction(outputStream)
                     }
                 }.getOrElse { throwable ->
+                    if (throwable is CancellationException) throw throwable
                     ExportResult.Error(
                         message = throwable.message ?: "Export failed unexpectedly",
                         cause = throwable
