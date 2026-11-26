@@ -113,7 +113,7 @@ fun SettingsRoute(
                 Instant.now().atZone(ZoneId.systemDefault())
             )
             try {
-                jsonExportLauncher.launch("music-tracker-export-$timestamp.json")
+                jsonExportLauncher.launch("collecto-export-$timestamp.json")
             } catch (_: ActivityNotFoundException) {
                 viewModel.reportExportError(
                     ExportFormat.JSON,
@@ -126,7 +126,7 @@ fun SettingsRoute(
                 Instant.now().atZone(ZoneId.systemDefault())
             )
             try {
-                sqliteExportLauncher.launch("music-tracker-backup-$timestamp.db")
+                sqliteExportLauncher.launch("collecto-backup-$timestamp.db")
             } catch (_: ActivityNotFoundException) {
                 viewModel.reportExportError(
                     ExportFormat.SQLITE,

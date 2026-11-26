@@ -229,4 +229,57 @@ interface DataExporter {
 ## Canonical Build & Verification Commands
 - Unit & Robolectric Tests: `./gradlew :app:testDebugUnitTest`
 - Debug APK Build: `./gradlew :app:assembleDebug`
+- Release APK Build: `./gradlew :app:assembleRelease`
 - Android Lint: `./gradlew :app:lintDebug`
+
+---
+
+# Release 2.0 — Collecto (`v2.0.0`)
+
+Release 2.0 rebrands the user-facing app to **Collecto** (`versionName = "2.0.0"`, `versionCode >= 20`) while keeping `applicationId = "com.musictracker.app"`, `DATABASE_NAME = "music_tracker.db"`, `PREFERENCES_FILE_NAME = "music_tracker_prefs"`, and `MusicNotificationListenerService` component name unchanged so existing `v1.0.5` installs update cleanly without losing permissions or data.
+
+## Preserved `v1.0.5` UX Baseline (Non-Negotiable)
+1. Swipeable Top 5 Tracks / Top 5 Artists `HorizontalPager` on Stats (`StatsScreen.kt`).
+2. 10-track scroll-to-unlock full history on Home (`HomeScreen.kt`, `HomeViewModel.kt`).
+3. Pure-vector Liquid Glass adaptive icon (`ic_launcher*.xml`).
+4. Apple iOS 26 Liquid Glass lens & material aesthetics (`LiquidGlassNavBar.kt`, `LiquidGlassSurface.kt`, `GlassModifiers.kt`).
+
+## Release 2.0 Architecture Additions
+- **Room Schema**: Stays on **version 1** (zero migration risk for `v1.0.5` upgrades). All new insights/drill-down/streak/peak-hour features query existing `tracks` + `listen_events` tables.
+- **Dependencies added**: `androidx.palette:palette-ktx:1.0.0`, `androidx.glance:glance-appwidget:1.1.1` (zero extra HTTP library — use `HttpURLConnection` + `org.json.JSONObject` behind testable `ArtworkHttpClient`).
+- **New Packages & Files**:
+  - `data/artwork/` — `ArtworkCacheManager.kt`, `OnlineArtworkFetcher.kt`, `ArtworkHttpClient.kt` (local WebP cache in `filesDir/artwork/{tracks,artists}/`)
+  - `data/preferences/` — `ArtworkPreferencesStore.kt` (`online_artwork_enabled`, default `true`)
+  - `domain/stats/` — `ListeningInsightsCalculator.kt` (pure Kotlin: daily streaks, collector milestones, 24-hour peak hours)
+  - `domain/model/` — `TrackDetailStats.kt`, `ArtistDetailStats.kt`, `ListeningInsights.kt` (`ListeningStreak`, `CollectorMilestone`, `HourlyListeningBucket`)
+  - `ui/share/` — `ShareCardModels.kt`, `ShareCardRenderer.kt` (Canvas + Bitmap + Palette, 9:16 & 4:5), `ShareCardExporter.kt` (MediaStore `Pictures/Collecto` + Instagram Stories `ADD_TO_STORY` + `ACTION_SEND`), `ShareCardSheet.kt`
+  - `ui/screens/stats/` — `DrillDownSheet.kt` (`LiquidGlassSheet` inside transparent M3 `ModalBottomSheet`), `InsightsCards.kt` (Streaks/Milestones + Peak Hours bar chart)
+  - `widget/` — `CollectoGlanceWidget.kt`, `CollectoWidgetReceiver.kt`, `CollectoWidgetState.kt`
+  - `res/xml/` — `file_paths.xml`, `collecto_widget_info.xml`
+  - `res/drawable/` — `widget_liquid_glass_bg.xml`
+
+## Release 2.0 Feature Inventory (Every Item Assigned)
+
+| # | Feature | Description | Milestone | Source |
+|---|---------|-------------|-----------|--------|
+| F28 | Rebrand to Collecto & `v2.0.0` Versioning | Rename `"Music Tracker"` → `"Collecto"` in `strings.xml`, UI headers, export filenames, `DataExporterImpl`, widgets, share cards; bump `versionName = "2.0.0"` while preserving `applicationId`, DB, prefs, NLS component; add Palette/Glance deps & Manifest entries (`INTERNET`, `ACCESS_NETWORK_STATE`, `FileProvider`, Instagram `<queries>`) | M6 | ORIGINAL_REQUEST §1, §5, §6 |
+| F29 | Power Efficiency (Background + UI) | Background `HandlerThread` + API 31+ `migrateNotificationFilter(0, emptyList())` in NLS; idle/unchanged fast-paths & duplicate/non-focused skip in `MediaSessionCoordinator`; heartbeat `NowTrackingState` churn suppression in `PlaySessionStateMachine`; `repeatOnLifecycle(STARTED)` + leaf-scoped live ticker on Home; `LiquidGlassSurface` plain position holder + memoized `RenderEffect`/brushes; drop redundant `.blur(18.dp)` on gradient | M6 | ORIGINAL_REQUEST §2 |
+| F30 | Interactive Liquid Glass Bottom Bar | Bar-level `pointerInput` (`awaitEachGesture` + `touchSlop` + RTL) to press & drag/swipe horizontally on `LiquidGlassNavBar`, gliding swollen lens across tabs + `HapticFeedback` ticks on tab crossings & snap (respecting Reduced Motion) + `drawBehind` lens brushes | M7 | ORIGINAL_REQUEST §3 |
+| F31 | Directional Slide Tab Transitions | Ordinal-based horizontal slide transitions (`slideInHorizontally`/`slideOutHorizontally`) in `MusicTrackerNavHost` (left when moving right, right when moving left; `None` when Reduced Motion); NO screen-body horizontal swipe | M7 | ORIGINAL_REQUEST §4 |
+| F32 | Offline-First Cover Art & Artist Platform Photos | IO-offloaded `MediaMetadata` bitmap capture → local WebP cache (`filesDir/artwork/{tracks,artists}/`); Settings toggle (`online_artwork_enabled`, default ON); Deezer public API artist photos + Deezer/iTunes album cover fallback; immediate local WebP persistence; `ArtworkThumbnail` + circular `ArtistAvatar` | M8 | ORIGINAL_REQUEST §2, §5 |
+| F33 | Artist & Track Drill-Down Sheet | Tap artist/track on Stats → `LiquidGlassSheet` showing play count, total listening time, skip rate, first/last heard date, top tracks by artist (artist view), and direct Share button | M9 | ORIGINAL_REQUEST §7 |
+| F34 | Listening Streaks & Milestones | Pure-Kotlin timezone-safe daily streak tracker (`currentStreakDays`, `longestStreakDays`) and unlockable collector milestone badges surfaced cleanly on Stats | M9 | ORIGINAL_REQUEST §7 |
+| F35 | Listening Rhythm ("Peak Hours") | 24-hour listening bucket aggregation + compact bar chart on Stats highlighting peak listening hour | M9 | ORIGINAL_REQUEST §7 |
+| F36 | Top Music & Top Artist Sharing | Share sheet on Stats & Drill-Down supporting Top Artist, Top Music (Top Track / Top 5), and Listening Summary cards; timeframe + 9:16 / 4:5 aspect ratio; AndroidX Palette ambient backdrop; Save to `Pictures/Collecto` via MediaStore; Instagram Stories (`ADD_TO_STORY` + FileProvider) + `ACTION_SEND` | M9 | ORIGINAL_REQUEST §6 |
+| F37 | Home Screen Widget (Jetpack Glance) & Release `v2.0.0` | Liquid Glass-styled Glance widget showing "Now Tracking" or #1 artist & weekly listening time, updated only on discrete playback/DB events; full build/lint/test verification & GitHub Release `v2.0.0` publication | M10 | ORIGINAL_REQUEST §7, §8 |
+
+## Release 2.0 Milestones
+
+| # | Name | Scope | Dependencies | Status |
+|---|------|-------|--------------|--------|
+| M6 | Rebrand, Manifest/Deps Prep & Power Efficiency (Background + UI) | F28, F29 + lean targeted unit tests + commit & push to `origin/main` | M5 (`3a56176`) | IN_PROGRESS |
+| M7 | Interactive Liquid Glass Bottom Bar & Directional Slide Transitions | F30, F31 + lean targeted unit tests + commit & push to `origin/main` | M6 | PLANNED |
+| M8 | Offline-First Cover Art & Artist Platform Photos | F32 + lean targeted unit tests + commit & push to `origin/main` | M6 | PLANNED |
+| M9 | Collecto Insights (Drill-Down, Streaks, Peak Hours) & Native Sharing | F33, F34, F35, F36 + lean targeted unit tests + commit & push to `origin/main` | M7, M8 | PLANNED |
+| M10 | Jetpack Glance Widget, Final Verification & GitHub Release `v2.0.0` | F37 + lean targeted unit test + full test/lint/debug+release APK verification + commit/push + `gh release create v2.0.0` | M9 | PLANNED |
+

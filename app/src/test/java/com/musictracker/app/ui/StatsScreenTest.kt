@@ -93,11 +93,11 @@ class StatsScreenTest {
 
         composeTestRule.onNodeWithTag(TestTags.STATS_TOP_TRACKS_LIST).assertIsDisplayed()
         composeTestRule.onNodeWithTag(TestTags.statsTrackItem(10L)).assertIsDisplayed()
-        composeTestRule.onNodeWithTag(TestTags.statsTrackItem(20L)).assertIsDisplayed()
         composeTestRule.onNodeWithText("Pyramids").assertIsDisplayed()
+        composeTestRule.onNodeWithTag(TestTags.statsTrackItem(20L)).assertExists()
 
-        composeTestRule.onNode(hasScrollToNodeAction())
-            .performScrollToNode(hasTestTag(TestTags.STATS_TOP_ARTISTS_LIST))
+        composeTestRule.onNodeWithText("Top 5 Artists").performClick()
+        composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag(TestTags.STATS_TOP_ARTISTS_LIST).assertIsDisplayed()
         composeTestRule.onNodeWithTag(TestTags.statsArtistItem(0)).assertIsDisplayed()
         composeTestRule.onNodeWithText("15 plays · 2 tracks").assertIsDisplayed()

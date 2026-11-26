@@ -5,6 +5,7 @@ import android.content.ComponentName
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
 import android.os.Handler
+import android.os.Looper
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.musictracker.app.data.db.MusicTrackerDatabase
@@ -29,6 +30,8 @@ import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -81,6 +84,8 @@ class MusicNotificationListenerServiceTest {
             private set
         var lastComponentName: ComponentName? = null
             private set
+        var lastHandler: Handler? = null
+            private set
         val registeredListeners: MutableList<MediaSessionManager.OnActiveSessionsChangedListener> =
             mutableListOf()
 
@@ -91,6 +96,7 @@ class MusicNotificationListenerServiceTest {
         ) {
             registerCalls++
             lastComponentName = notificationListener
+            lastHandler = handler
             if (throwSecurityExceptionOnRegister) {
                 throw SecurityException("Notification access not granted")
             }
@@ -338,5 +344,95 @@ class MusicNotificationListenerServiceTest {
         assertEquals(1, events.size)
         assertEquals(7_000L, events.single().actualListenedMs)
         assertEquals("Destroy Flush Track", database.trackDao().getAll().single().normalizedTitle)
+    }
+
+    @Test
+    fun onListenerConnected_dispatchesOnBackgroundHandlerThread_andQuitsSafelyOnDestroy() = runTest {
+        val coordinator = createCoordinator(this)
+        val gateway = FakeMediaSessionGateway()
+        val controller = Robolectric.buildService(MusicNotificationListenerService::class.java).create()
+        val service = controller.get().apply {
+            coordinatorOverride = coordinator
+            mediaSessionGatewayOverride = gateway
+        }
+
+        service.onListenerConnected()
+        runCurrent()
+
+        val handler = gateway.lastHandler
+        assertNotNull(handler)
+        assertNotEquals(Looper.getMainLooper(), handler!!.looper)
+        val callbackThread = handler.looper.thread
+        assertTrue(callbackThread.isAlive)
+
+        controller.destroy()
+        runCurrent()
+        callbackThread.join(1_000L)
+        assertFalse(callbackThread.isAlive)
+    }
+
+    @Test
+    fun activeSessionsChangedListener_afterDisconnectAndDestroy_doesNotSpawnThreadOrReattachSessions() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val coordinator = createCoordinator(this)
+        val gateway = FakeMediaSessionGateway()
+        val controller = Robolectric.buildService(MusicNotificationListenerService::class.java).create()
+        val service = controller.get().apply {
+            coordinatorOverride = coordinator
+            mediaSessionGatewayOverride = gateway
+        }
+
+        val mediaSession = android.media.session.MediaSession(context, "stale-callback-test")
+        val mediaController = mediaSession.controller
+        org.robolectric.Shadows.shadowOf(mediaController).apply {
+            setPackageName("com.google.android.apps.youtube.music")
+            setMetadata(
+                android.media.MediaMetadata.Builder()
+                    .putString(android.media.MediaMetadata.METADATA_KEY_TITLE, "Stale Callback Track")
+                    .putString(android.media.MediaMetadata.METADATA_KEY_ARTIST, "Stale Artist")
+                    .putLong(android.media.MediaMetadata.METADATA_KEY_DURATION, 180_000L)
+                    .build()
+            )
+            setPlaybackState(
+                android.media.session.PlaybackState.Builder()
+                    .setState(android.media.session.PlaybackState.STATE_PLAYING, 0L, 1.0f)
+                    .build()
+            )
+        }
+        try {
+            service.onListenerConnected()
+            runCurrent()
+
+            val capturedListener = gateway.registeredListeners.single()
+            val initialThread = service.activeCallbackThread
+            assertNotNull(initialThread)
+
+            // Sanity check: while connected, the same controller attaches and starts tracking.
+            capturedListener.onActiveSessionsChanged(listOf(mediaController))
+            runCurrent()
+            assertNotNull(coordinator.nowTracking.value)
+
+            // 1. After onListenerDisconnected(): firing stale listener must NOT re-attach sessions.
+            service.onListenerDisconnected()
+            runCurrent()
+            assertNull(coordinator.nowTracking.value)
+
+            capturedListener.onActiveSessionsChanged(listOf(mediaController))
+            runCurrent()
+            assertNull(coordinator.nowTracking.value)
+
+            // 2. After onDestroy(): firing stale listener must NOT spawn a new HandlerThread or re-attach sessions.
+            controller.destroy()
+            runCurrent()
+            initialThread!!.join(1_000L)
+            assertNull(service.activeCallbackThread)
+
+            capturedListener.onActiveSessionsChanged(listOf(mediaController))
+            runCurrent()
+            assertNull(service.activeCallbackThread)
+            assertNull(coordinator.nowTracking.value)
+        } finally {
+            mediaSession.release()
+        }
     }
 }

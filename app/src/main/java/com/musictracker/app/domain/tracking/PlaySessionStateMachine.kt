@@ -66,7 +66,33 @@ class PlaySessionStateMachine(
     override fun onPlaybackEvent(event: PlaybackEvent): List<CompletedListenSession> =
         synchronized(lock) {
             val now = clock.elapsedRealtimeMs()
+
+            if (event is PlaybackEvent.StateChanged) {
+                val pkg = event.sourcePackage.trim()
+                val session = currentSession
+                if (
+                    session != null &&
+                    session.identity.sourcePackage == pkg &&
+                    event.state.status == PlaybackStatus.PLAYING &&
+                    session.phase == Phase.ACTIVE &&
+                    session.segmentStartElapsedMs != null &&
+                    _nowTracking.value != null &&
+                    !isSingleTrackLoop(session, newPos = event.state.positionMs, now = now)
+                ) {
+                    latestStateByPackage[pkg] = event.state
+                    session.pausedSinceElapsedMs = null
+                    if (event.state.positionMs >= 0L) {
+                        session.lastPlayingPositionMs = event.state.positionMs
+                    }
+                    return emptyList()
+                }
+            }
+
             val emitted = mutableListOf<CompletedListenSession>()
+            val prevSession = currentSession
+            val prevPhase = prevSession?.phase
+            val prevSegmentStart = prevSession?.segmentStartElapsedMs
+            var metadataPatched = false
 
             checkIdlePauseTimeout(now, emitted)
 
@@ -76,7 +102,12 @@ class PlaySessionStateMachine(
                 }
 
                 is PlaybackEvent.MetadataChanged -> {
-                    handleMetadataChanged(event.sourcePackage.trim(), event.metadata, now, emitted)
+                    metadataPatched = handleMetadataChanged(
+                        event.sourcePackage.trim(),
+                        event.metadata,
+                        now,
+                        emitted
+                    )
                 }
 
                 is PlaybackEvent.StateChanged -> {
@@ -84,7 +115,7 @@ class PlaySessionStateMachine(
                 }
 
                 is PlaybackEvent.SessionSnapshot -> {
-                    handleSessionSnapshot(
+                    metadataPatched = handleSessionSnapshot(
                         pkg = event.sourcePackage.trim(),
                         metadata = event.metadata,
                         state = event.state,
@@ -94,7 +125,17 @@ class PlaySessionStateMachine(
                 }
             }
 
-            publishNowTracking()
+            val unchangedActiveOrPaused =
+                currentSession === prevSession &&
+                    prevSession != null &&
+                    prevSession.phase == prevPhase &&
+                    prevSession.segmentStartElapsedMs == prevSegmentStart &&
+                    !metadataPatched &&
+                    emitted.isEmpty() &&
+                    _nowTracking.value != null
+            if (!unchangedActiveOrPaused) {
+                publishNowTracking()
+            }
             emitted
         }
 
@@ -133,9 +174,9 @@ class PlaySessionStateMachine(
         metadata: MediaMetadataSnapshot,
         now: Long,
         emitted: MutableList<CompletedListenSession>
-    ) {
+    ): Boolean {
         if (metadata.title.isBlank()) {
-            return
+            return false
         }
 
         latestMetadataByPackage[pkg] = metadata
@@ -146,10 +187,11 @@ class PlaySessionStateMachine(
         )
         val session = currentSession
 
-        when {
+        return when {
             session != null && session.identity == incomingIdentity -> {
-                patchMetadataInPlace(session, metadata)
+                val patched = patchMetadataInPlace(session, metadata)
                 promoteIfEligible(session, now)
+                patched
             }
 
             session != null && session.identity.sourcePackage == pkg -> {
@@ -159,6 +201,7 @@ class PlaySessionStateMachine(
                 if (wasPlaying) {
                     startNewSession(pkg, metadata, initialPosMs = 0L, now = now)
                 }
+                false
             }
 
             session == null -> {
@@ -166,6 +209,7 @@ class PlaySessionStateMachine(
                 if (latestState?.status == PlaybackStatus.PLAYING) {
                     startNewSession(pkg, metadata, initialPosMs = latestState.positionMs, now = now)
                 }
+                false
             }
 
             else -> {
@@ -174,6 +218,7 @@ class PlaySessionStateMachine(
                     finalizeOrDiscardCurrent(now, isLoopRestart = false, emitted = emitted)
                     startNewSession(pkg, metadata, initialPosMs = latestState.positionMs, now = now)
                 }
+                false
             }
         }
     }
@@ -219,7 +264,7 @@ class PlaySessionStateMachine(
         state: PlaybackStateSnapshot?,
         now: Long,
         emitted: MutableList<CompletedListenSession>
-    ) {
+    ): Boolean {
         val validMeta = metadata?.takeIf { it.title.isNotBlank() }
         if (validMeta != null) {
             latestMetadataByPackage[pkg] = validMeta
@@ -228,6 +273,7 @@ class PlaySessionStateMachine(
             latestStateByPackage[pkg] = state
         }
 
+        var metadataPatched = false
         val session = currentSession
         if (session != null && session.identity.sourcePackage == pkg) {
             val incomingIdentity = validMeta?.let {
@@ -250,7 +296,7 @@ class PlaySessionStateMachine(
                 }
             } else {
                 if (validMeta != null) {
-                    patchMetadataInPlace(session, validMeta)
+                    metadataPatched = patchMetadataInPlace(session, validMeta)
                 }
                 if (state != null) {
                     applyStateToCurrentSession(session, state, now, emitted)
@@ -269,6 +315,7 @@ class PlaySessionStateMachine(
                 }
             }
         }
+        return metadataPatched
     }
 
     private fun applyStateToCurrentSession(
@@ -443,16 +490,22 @@ class PlaySessionStateMachine(
         )
     }
 
-    private fun patchMetadataInPlace(session: SessionRecord, metadata: MediaMetadataSnapshot) {
-        if (metadata.durationMs > 0L) {
+    private fun patchMetadataInPlace(session: SessionRecord, metadata: MediaMetadataSnapshot): Boolean {
+        var changed = false
+        if (metadata.durationMs > 0L && session.durationMs != metadata.durationMs) {
             session.durationMs = metadata.durationMs
+            changed = true
         }
-        if (metadata.album.isNotBlank()) {
-            session.album = metadata.album.trim()
+        val trimmedAlbum = metadata.album.trim()
+        if (trimmedAlbum.isNotBlank() && session.album != trimmedAlbum) {
+            session.album = trimmedAlbum
+            changed = true
         }
-        if (metadata.artworkUri != null) {
+        if (metadata.artworkUri != null && session.artworkUri != metadata.artworkUri) {
             session.artworkUri = metadata.artworkUri
+            changed = true
         }
+        return changed
     }
 
     private fun publishNowTracking() {

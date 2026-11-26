@@ -12,7 +12,9 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -647,5 +649,63 @@ class PlaySessionStateMachineTest {
             engine.onPlaybackEvent(PlaybackEvent.StateChanged(ytMusicPkg, PlaybackStateSnapshot(PlaybackStatus.STOPPED)))
             assertNull(awaitItem())
         }
+    }
+
+    @Test
+    fun activePlayingHeartbeats_suppressNowTrackingStateReallocation_whilePreservingLoopDetection() {
+        engine.onPlaybackEvent(PlaybackEvent.MetadataChanged(ytMusicPkg, blindingLights))
+        engine.onPlaybackEvent(PlaybackEvent.StateChanged(ytMusicPkg, PlaybackStateSnapshot(PlaybackStatus.PLAYING, 0L)))
+        clock.advanceBy(1_500L)
+        engine.onTick()
+
+        val activeRef = engine.nowTracking.value!!
+        assertFalse(activeRef.isDebouncing)
+        assertTrue(activeRef.isPlaying)
+
+        val heartbeatPositions = listOf(5_000L, 30_000L, 60_000L, 120_000L, 198_000L)
+        for (pos in heartbeatPositions) {
+            clock.advanceBy(10_000L)
+            val emitted = engine.onPlaybackEvent(
+                PlaybackEvent.StateChanged(ytMusicPkg, PlaybackStateSnapshot(PlaybackStatus.PLAYING, pos))
+            )
+            assertTrue(emitted.isEmpty())
+            assertSame(activeRef, engine.nowTracking.value)
+        }
+
+        // Loop wrap from near end (198s) to start (500ms) must still emit & publish fresh PENDING state.
+        clock.advanceBy(2_000L)
+        val loopEmitted = engine.onPlaybackEvent(
+            PlaybackEvent.StateChanged(ytMusicPkg, PlaybackStateSnapshot(PlaybackStatus.PLAYING, 500L))
+        )
+        assertEquals(1, loopEmitted.size)
+        assertFalse(loopEmitted.single().wasSkipped)
+        assertNotSame(activeRef, engine.nowTracking.value)
+        assertTrue(engine.nowTracking.value!!.isDebouncing)
+    }
+
+    @Test
+    fun activePlayingHeartbeats_stillPublishOnMetadataEnrichmentAndPhaseTransitions() {
+        engine.onPlaybackEvent(PlaybackEvent.MetadataChanged(ytMusicPkg, blindingLights))
+        engine.onPlaybackEvent(PlaybackEvent.StateChanged(ytMusicPkg, PlaybackStateSnapshot(PlaybackStatus.PLAYING, 0L)))
+        clock.advanceBy(1_500L)
+        engine.onTick()
+
+        val activeRef = engine.nowTracking.value!!
+
+        // Late artwork enrichment must publish updated NowTrackingState.
+        val enriched = blindingLights.copy(artworkUri = "content://art/updated")
+        engine.onPlaybackEvent(PlaybackEvent.MetadataChanged(ytMusicPkg, enriched))
+        val afterEnrich = engine.nowTracking.value!!
+        assertNotSame(activeRef, afterEnrich)
+        assertEquals("content://art/updated", afterEnrich.artworkUri)
+
+        // Pause -> Resume transitions must publish.
+        clock.advanceBy(5_000L)
+        engine.onPlaybackEvent(PlaybackEvent.StateChanged(ytMusicPkg, PlaybackStateSnapshot(PlaybackStatus.PAUSED, 6_500L)))
+        assertFalse(engine.nowTracking.value!!.isPlaying)
+
+        clock.advanceBy(2_000L)
+        engine.onPlaybackEvent(PlaybackEvent.StateChanged(ytMusicPkg, PlaybackStateSnapshot(PlaybackStatus.PLAYING, 6_500L)))
+        assertTrue(engine.nowTracking.value!!.isPlaying)
     }
 }

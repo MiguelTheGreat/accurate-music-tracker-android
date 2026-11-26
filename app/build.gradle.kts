@@ -16,8 +16,8 @@ android {
         applicationId = "com.musictracker.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = (project.findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 2
-        versionName = (project.findProperty("appVersionName") as String?) ?: "1.0.2"
+        versionCode = (project.findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 20
+        versionName = (project.findProperty("appVersionName") as String?) ?: "2.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -112,6 +112,8 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.coil.compose)
+    implementation(libs.androidx.palette.ktx)
+    implementation(libs.androidx.glance.appwidget)
 
     // Room
     implementation(libs.androidx.room.runtime)

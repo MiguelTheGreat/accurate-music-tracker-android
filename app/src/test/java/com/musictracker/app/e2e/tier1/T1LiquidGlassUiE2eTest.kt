@@ -327,9 +327,12 @@ class T1LiquidGlassUiE2eTest {
         composeRule.onNodeWithTag(TestTags.STATS_TIMEFRAME_CONTROL).assertIsDisplayed()
         composeRule.onNodeWithTag(TestTags.STATS_TOP_TRACKS_LIST).assertIsDisplayed()
         composeRule.onNodeWithText("Deep Listen Song").assertIsDisplayed()
-        composeRule.scrollToTag(TestTags.STATS_TOP_ARTISTS_LIST)
+        composeRule.onNodeWithText("Top 5 Artists").performClick()
+        composeRule.waitForIdle()
         composeRule.onNodeWithTag(TestTags.STATS_TOP_ARTISTS_LIST).assertIsDisplayed()
         composeRule.onNodeWithTag(TestTags.statsArtistItem(0)).assertIsDisplayed()
+        composeRule.onNodeWithText("Top 5 Tracks").performClick()
+        composeRule.waitForIdle()
 
         // 2. 7 DAYS: 3 tracks, 3 artists; Three Day Song (300s) ranks #1
         composeRule.scrollToTag(TestTags.STATS_TIMEFRAME_CONTROL)
@@ -364,7 +367,8 @@ class T1LiquidGlassUiE2eTest {
         assertEquals("Forty Five Day Song", vm.uiState.value.topTracks[0].title)
         assertEquals("Ancient Artist", vm.uiState.value.topArtists[0].artist)
         composeRule.onNodeWithText("Forty Five Day Song").assertIsDisplayed()
-        composeRule.scrollToTag(TestTags.STATS_TOP_ARTISTS_LIST)
+        composeRule.onNodeWithText("Top 5 Artists").performClick()
+        composeRule.waitForIdle()
         composeRule.onNodeWithTag(TestTags.STATS_TOP_ARTISTS_LIST).assertIsDisplayed()
 
         // 5. Switch back to TODAY: filters back to 2 tracks, 2 artists

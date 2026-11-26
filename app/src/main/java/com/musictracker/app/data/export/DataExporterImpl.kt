@@ -20,7 +20,7 @@ class DataExporterImpl(
     private val database: MusicTrackerDatabase,
     private val dbFileProvider: () -> File,
     private val clock: TrackerClock,
-    private val appVersion: String = "1.0.0",
+    private val appVersion: String = "2.0.0",
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val json: Json = createExportJson()
 ) : DataExporter {

@@ -15,10 +15,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
@@ -84,7 +82,7 @@ fun LiquidGlassSurface(
     val isNestedGlass = LocalInsideLiquidGlass.current
     val density = LocalDensity.current
 
-    var surfacePositionInRoot by remember { mutableStateOf(Offset.Zero) }
+    val surfacePositionInRoot = remember { mutableStateOf(Offset.Zero) }
 
     val baseBlurDp = blurRadiusOverride ?: when (variant) {
         LiquidGlassVariant.Regular, LiquidGlassVariant.Prominent -> LiquidGlassMetrics.BlurRadiusRegular
@@ -102,64 +100,85 @@ fun LiquidGlassSurface(
         backdrop != null &&
         blurRadiusPx > LiquidGlassMetrics.MinSafeBlurRadiusPx
 
+    val composeRenderEffect = remember(canUseBackdropBlur, blurRadiusPx, saturation) {
+        if (canUseBackdropBlur && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            createLiquidGlassRenderEffect(
+                radiusPx = blurRadiusPx,
+                saturation = saturation
+            )?.asComposeRenderEffect()
+        } else {
+            null
+        }
+    }
+
     val borderWidth = if (accessibility.highContrast) {
         LiquidGlassMetrics.RimWidthHighContrast
     } else {
         LiquidGlassMetrics.RimWidthStandard
     }
-    val borderBrush = if (accessibility.highContrast) {
-        Brush.verticalGradient(listOf(colors.rimBorderHighContrast, colors.rimBorderHighContrast))
-    } else {
-        Brush.verticalGradient(
-            colorStops = arrayOf(
-                0.0f to colors.specularTopHighlight,
-                0.35f to colors.rimBorder,
-                1.0f to colors.specularBottomHighlight
+    val borderBrush = remember(accessibility.highContrast, colors) {
+        if (accessibility.highContrast) {
+            Brush.verticalGradient(listOf(colors.rimBorderHighContrast, colors.rimBorderHighContrast))
+        } else {
+            Brush.verticalGradient(
+                colorStops = arrayOf(
+                    0.0f to colors.specularTopHighlight,
+                    0.35f to colors.rimBorder,
+                    1.0f to colors.specularBottomHighlight
+                )
             )
-        )
+        }
     }
 
-    val fillBrush: Brush = when {
-        accessibility.reduceTransparency || isNestedGlass -> {
-            val solid = when (variant) {
-                LiquidGlassVariant.Prominent -> colors.accentBlue
-                LiquidGlassVariant.Regular, LiquidGlassVariant.Clear -> colors.regularFillReducedTransparency
+    val fillBrush: Brush = remember(
+        accessibility.reduceTransparency,
+        isNestedGlass,
+        variant,
+        canUseBackdropBlur,
+        colors
+    ) {
+        when {
+            accessibility.reduceTransparency || isNestedGlass -> {
+                val solid = when (variant) {
+                    LiquidGlassVariant.Prominent -> colors.accentBlue
+                    LiquidGlassVariant.Regular, LiquidGlassVariant.Clear -> colors.regularFillReducedTransparency
+                }
+                Brush.verticalGradient(listOf(solid, solid))
             }
-            Brush.verticalGradient(listOf(solid, solid))
-        }
 
-        variant == LiquidGlassVariant.Prominent -> {
-            Brush.linearGradient(
-                colors = listOf(colors.prominentGradientStart, colors.prominentGradientEnd)
-            )
-        }
-
-        variant == LiquidGlassVariant.Clear -> {
-            Brush.verticalGradient(
-                colors = listOf(
-                    colors.clearFill.copy(alpha = (colors.clearFill.alpha * 1.15f).coerceAtMost(1f)),
-                    colors.clearFill
+            variant == LiquidGlassVariant.Prominent -> {
+                Brush.linearGradient(
+                    colors = listOf(colors.prominentGradientStart, colors.prominentGradientEnd)
                 )
-            )
-        }
+            }
 
-        canUseBackdropBlur -> {
-            Brush.verticalGradient(
-                colors = listOf(
-                    colors.regularFill,
-                    colors.regularFill.copy(alpha = (colors.regularFill.alpha * 0.92f).coerceAtLeast(0f))
+            variant == LiquidGlassVariant.Clear -> {
+                Brush.verticalGradient(
+                    colors = listOf(
+                        colors.clearFill.copy(alpha = (colors.clearFill.alpha * 1.15f).coerceAtMost(1f)),
+                        colors.clearFill
+                    )
                 )
-            )
-        }
+            }
 
-        else -> {
-            // API 26-30 frosted translucent fallback
-            Brush.verticalGradient(
-                colors = listOf(
-                    colors.regularFillFallback,
-                    colors.regularFillFallback.copy(alpha = (colors.regularFillFallback.alpha * 0.94f).coerceAtLeast(0f))
+            canUseBackdropBlur -> {
+                Brush.verticalGradient(
+                    colors = listOf(
+                        colors.regularFill,
+                        colors.regularFill.copy(alpha = (colors.regularFill.alpha * 0.92f).coerceAtLeast(0f))
+                    )
                 )
-            )
+            }
+
+            else -> {
+                // API 26-30 frosted translucent fallback
+                Brush.verticalGradient(
+                    colors = listOf(
+                        colors.regularFillFallback,
+                        colors.regularFillFallback.copy(alpha = (colors.regularFillFallback.alpha * 0.94f).coerceAtLeast(0f))
+                    )
+                )
+            }
         }
     }
 
@@ -175,9 +194,15 @@ fun LiquidGlassSurface(
                 clip = false
             )
             .clip(shape)
-            .onGloballyPositioned { coordinates ->
-                surfacePositionInRoot = coordinates.positionInRoot()
-            }
+            .then(
+                if (canUseBackdropBlur) {
+                    Modifier.onGloballyPositioned { coordinates ->
+                        surfacePositionInRoot.value = coordinates.positionInRoot()
+                    }
+                } else {
+                    Modifier
+                }
+            )
             .touchPointIllumination(enabled = interactive && !isNestedGlass)
     ) {
         // Layer 1: Background-only blurred backdrop (sibling behind foreground content)
@@ -188,18 +213,11 @@ fun LiquidGlassSurface(
                     .graphicsLayer {
                         clip = true
                         this.shape = shape
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-                            blurRadiusPx > LiquidGlassMetrics.MinSafeBlurRadiusPx
-                        ) {
-                            renderEffect = createLiquidGlassRenderEffect(
-                                radiusPx = blurRadiusPx,
-                                saturation = saturation
-                            )?.asComposeRenderEffect()
-                        }
+                        renderEffect = composeRenderEffect
                     }
                     .drawBehind {
                         if (backdrop.hasRecordedContent) {
-                            val offset = surfacePositionInRoot - backdrop.hostPositionInRoot
+                            val offset = surfacePositionInRoot.value - backdrop.hostPositionInRoot
                             translate(left = -offset.x, top = -offset.y) {
                                 drawLayer(backdrop.graphicsLayer)
                             }

@@ -10,14 +10,19 @@ import com.musictracker.app.data.preferences.AllowlistRepository
 import com.musictracker.app.data.preferences.DefaultAllowlist
 import com.musictracker.app.data.repository.ListeningRepositoryImpl
 import com.musictracker.app.domain.clock.TrackerClock
+import com.musictracker.app.domain.model.CompletedListenSession
 import com.musictracker.app.domain.model.MediaMetadataSnapshot
+import com.musictracker.app.domain.model.NowTrackingState
+import com.musictracker.app.domain.model.PlaybackEvent
 import com.musictracker.app.domain.model.PlaybackStateSnapshot
 import com.musictracker.app.domain.model.PlaybackStatus
 import com.musictracker.app.domain.normalization.MusicMetadataNormalizer
+import com.musictracker.app.domain.tracking.PlaySessionEngine
 import com.musictracker.app.domain.tracking.PlaySessionStateMachine
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
@@ -148,10 +153,38 @@ class MediaSessionCoordinatorTest {
         database.close()
     }
 
-    private fun createCoordinator(testScope: TestScope): MediaSessionCoordinator {
+    private class CountingPlaySessionEngine(
+        private val delegate: PlaySessionEngine
+    ) : PlaySessionEngine {
+        var onPlaybackEventCalls: Int = 0
+            private set
+        var onSessionEndedCalls: Int = 0
+            private set
+
+        override val nowTracking: StateFlow<NowTrackingState?>
+            get() = delegate.nowTracking
+
+        override fun onPlaybackEvent(event: PlaybackEvent): List<CompletedListenSession> {
+            onPlaybackEventCalls++
+            return delegate.onPlaybackEvent(event)
+        }
+
+        override fun onSessionEnded(sourcePackage: String): List<CompletedListenSession> {
+            onSessionEndedCalls++
+            return delegate.onSessionEnded(sourcePackage)
+        }
+
+        override fun flushActiveSession(): List<CompletedListenSession> =
+            delegate.flushActiveSession()
+    }
+
+    private fun createCoordinator(
+        testScope: TestScope,
+        engine: PlaySessionEngine = stateMachine
+    ): MediaSessionCoordinator {
         val dispatcher = StandardTestDispatcher(testScope.testScheduler)
         return MediaSessionCoordinator(
-            playSessionEngine = stateMachine,
+            playSessionEngine = engine,
             allowlistRepository = allowlistRepository,
             listeningRepository = repository,
             clock = clock,
@@ -629,6 +662,98 @@ class MediaSessionCoordinatorTest {
         val eventsAfterStop = database.listenEventDao().getAll()
         assertEquals(1, eventsAfterStop.size)
         assertEquals(3_000L, eventsAfterStop.single().actualListenedMs)
+
+        coordinator.flushAndStop().join()
+    }
+
+    @Test
+    fun idleFastPath_andUnchangedTopology_avoidEngineAndControllerChurn() = runTest {
+        val countingEngine = CountingPlaySessionEngine(stateMachine)
+        val coordinator = createCoordinator(this, engine = countingEngine)
+        coordinator.start()
+        runCurrent()
+
+        val youtubeVideo = FakeTrackedMediaController(
+            tokenId = "yt-video",
+            packageName = "com.google.android.youtube",
+            metadata = buildMetadata(title = "Vlog", artist = "Creator"),
+            playbackState = buildPlaybackState(PlaybackState.STATE_PLAYING)
+        )
+
+        coordinator.onActiveSessionsChanged(emptyList())
+        coordinator.onActiveSessionsChanged(listOf(youtubeVideo))
+        runCurrent()
+
+        assertEquals(0, countingEngine.onPlaybackEventCalls)
+        assertEquals(0, countingEngine.onSessionEndedCalls)
+        assertEquals(0, youtubeVideo.registerCount)
+
+        val ytMusicPaused = FakeTrackedMediaController(
+            tokenId = "ytm-paused",
+            packageName = "com.google.android.apps.youtube.music",
+            metadata = buildMetadata(title = "Paused Track", artist = "Artist"),
+            playbackState = buildPlaybackState(PlaybackState.STATE_PAUSED)
+        )
+        coordinator.onActiveSessionsChanged(listOf(ytMusicPaused))
+        runCurrent()
+        assertEquals(1, ytMusicPaused.registerCount)
+        assertEquals(0, countingEngine.onPlaybackEventCalls)
+
+        // Same eligible topology with extra non-allowlisted controller must hit fast-path.
+        coordinator.onActiveSessionsChanged(listOf(ytMusicPaused, youtubeVideo))
+        runCurrent()
+        assertEquals(1, ytMusicPaused.registerCount)
+        assertEquals(0, countingEngine.onPlaybackEventCalls)
+
+        coordinator.flushAndStop().join()
+    }
+
+    @Test
+    fun duplicateNonPlayingStates_andUnfocusedCallbacks_shortCircuitWithoutEngineChurn() = runTest {
+        val countingEngine = CountingPlaySessionEngine(stateMachine)
+        val coordinator = createCoordinator(this, engine = countingEngine)
+        coordinator.start()
+        runCurrent()
+
+        val ytMusic = FakeTrackedMediaController(
+            tokenId = "ytm",
+            packageName = "com.google.android.apps.youtube.music",
+            metadata = buildMetadata(title = "Song A", artist = "Artist A", durationMs = 200_000L),
+            playbackState = buildPlaybackState(PlaybackState.STATE_PLAYING)
+        )
+        val spotify = FakeTrackedMediaController(
+            tokenId = "sp",
+            packageName = "com.spotify.music",
+            metadata = buildMetadata(title = "Song B", artist = "Artist B", durationMs = 200_000L),
+            playbackState = buildPlaybackState(PlaybackState.STATE_PAUSED)
+        )
+
+        coordinator.onActiveSessionsChanged(listOf(ytMusic, spotify))
+        runCurrent()
+        clock.advanceBy(2_000L)
+        advanceTimeBy(2_000L)
+        runCurrent()
+
+        val pausedState = buildPlaybackState(PlaybackState.STATE_PAUSED, positionMs = 2_000L)
+        ytMusic.emitPlaybackState(pausedState)
+        runCurrent()
+        val callsAfterPause = countingEngine.onPlaybackEventCalls
+
+        // Duplicate identical PAUSED states must be deduplicated before hitting engine.
+        repeat(5) {
+            ytMusic.emitPlaybackState(pausedState)
+        }
+        runCurrent()
+        assertEquals(callsAfterPause, countingEngine.onPlaybackEventCalls)
+
+        // Unfocused controller metadata and non-playing state callbacks must not touch engine.
+        spotify.emitMetadata(buildMetadata(title = "Song B2", artist = "Artist B"))
+        spotify.emitPlaybackState(buildPlaybackState(PlaybackState.STATE_BUFFERING, positionMs = 1_000L))
+        spotify.emitPlaybackState(buildPlaybackState(PlaybackState.STATE_PAUSED, positionMs = 1_000L))
+        runCurrent()
+        assertEquals(callsAfterPause, countingEngine.onPlaybackEventCalls)
+        assertEquals("com.google.android.apps.youtube.music", coordinator.nowTracking.value?.sourcePackage)
+        assertFalse(coordinator.nowTracking.value!!.isPlaying)
 
         coordinator.flushAndStop().join()
     }

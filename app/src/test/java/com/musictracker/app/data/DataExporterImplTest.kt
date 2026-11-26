@@ -173,6 +173,7 @@ class DataExporterImplTest {
             out.toString(Charsets.UTF_8.name())
         )
         assertEquals(1, decoded.schemaVersion)
+        assertEquals("2.0.0", decoded.appVersion)
         assertTrue(decoded.tracks.isEmpty())
         assertTrue(decoded.listenEvents.isEmpty())
     }

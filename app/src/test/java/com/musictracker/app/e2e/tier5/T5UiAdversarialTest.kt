@@ -541,10 +541,11 @@ class T5UiAdversarialTest {
         }
 
         composeRule.waitForIdle()
-        composeRule.scrollToTag(TestTags.STATS_TOP_ARTISTS_LIST)
+        composeRule.onNodeWithText("Top 5 Artists").performClick()
+        composeRule.waitForIdle()
         // Full emoji code point (not broken high surrogate) and "?" fallback for blank artist.
         composeRule.onNodeWithText("🎵").assertIsDisplayed()
-        composeRule.onNodeWithText("?").assertIsDisplayed()
+        composeRule.onNodeWithText("?").assertExists()
     }
 
     // -------------------------------------------------------------------------

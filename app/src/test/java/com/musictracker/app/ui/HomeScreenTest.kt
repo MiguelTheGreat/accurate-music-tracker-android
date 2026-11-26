@@ -1,6 +1,7 @@
 package com.musictracker.app.ui
 
 import android.app.Application
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasTestTag
@@ -9,6 +10,10 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.musictracker.app.domain.model.ListeningSummary
 import com.musictracker.app.domain.model.NowTrackingState
 import com.musictracker.app.domain.model.RecentListenItem
@@ -50,6 +55,7 @@ class HomeScreenTest {
             }
         }
 
+        composeTestRule.onNodeWithText("Collecto").assertIsDisplayed()
         composeTestRule.onNodeWithTag(TestTags.HOME_PERMISSION_BANNER).assertIsDisplayed()
         composeTestRule.onNodeWithTag(TestTags.HOME_PERMISSION_ENABLE_BTN).performClick()
         assertEquals(1, enableClicks)
@@ -187,5 +193,73 @@ class HomeScreenTest {
 
         composeTestRule.onNodeWithText("Nothing Playing").assertIsDisplayed()
         composeTestRule.onNodeWithTag(TestTags.HOME_STAT_SKIP_RATE).assertTextContains("—")
+    }
+
+    @Test
+    fun liveCounterPausesWhenLifecycleStops_andRecomputesImmediatelyOnResume() {
+        val clock = FakeTrackerClock(elapsedMs = 100_000L)
+        val playingState = NowTrackingState(
+            sourcePackage = "com.google.android.apps.youtube.music",
+            rawTitle = "Nights",
+            rawArtist = "Frank Ocean",
+            normalizedTitle = "Nights",
+            normalizedArtist = "Frank Ocean",
+            album = "Blonde",
+            durationMs = 307_000L,
+            artworkUri = null,
+            isPlaying = true,
+            accumulatedMs = 10_000L,
+            segmentStartElapsedMs = 100_000L,
+            isDebouncing = false
+        )
+        val testLifecycleOwner = object : LifecycleOwner {
+            val registry = LifecycleRegistry(this).apply {
+                currentState = Lifecycle.State.RESUMED
+            }
+            override val lifecycle: Lifecycle
+                get() = registry
+        }
+
+        composeTestRule.mainClock.autoAdvance = false
+        composeTestRule.setContent {
+            CompositionLocalProvider(LocalLifecycleOwner provides testLifecycleOwner) {
+                MusicTrackerTheme {
+                    HomeScreenContent(
+                        uiState = HomeUiState(
+                            isNotificationAccessGranted = true,
+                            nowTracking = playingState,
+                            isLoading = false
+                        ),
+                        clock = clock,
+                        onEnableNotificationAccess = {},
+                        onDismissPermissionBanner = {}
+                    )
+                }
+            }
+        }
+
+        composeTestRule.mainClock.advanceTimeByFrame()
+        composeTestRule.onNodeWithTag(TestTags.HOME_LIVE_COUNTER).assertTextContains("00:10")
+
+        clock.elapsedMs += 1_000L
+        composeTestRule.mainClock.advanceTimeBy(1_000L)
+        composeTestRule.mainClock.advanceTimeByFrame()
+        composeTestRule.onNodeWithTag(TestTags.HOME_LIVE_COUNTER).assertTextContains("00:11")
+
+        // Background the UI (STOPPED -> CREATED) and advance time by 15s: ticker must pause.
+        composeTestRule.runOnIdle {
+            testLifecycleOwner.registry.currentState = Lifecycle.State.CREATED
+        }
+        clock.elapsedMs += 15_000L
+        composeTestRule.mainClock.advanceTimeBy(15_000L)
+        composeTestRule.mainClock.advanceTimeByFrame()
+        composeTestRule.onNodeWithTag(TestTags.HOME_LIVE_COUNTER).assertTextContains("00:11")
+
+        // Foreground the UI (STARTED): counter must immediately recompute to 00:26 with zero lag.
+        composeTestRule.runOnIdle {
+            testLifecycleOwner.registry.currentState = Lifecycle.State.STARTED
+        }
+        composeTestRule.mainClock.advanceTimeByFrame()
+        composeTestRule.onNodeWithTag(TestTags.HOME_LIVE_COUNTER).assertTextContains("00:26")
     }
 }

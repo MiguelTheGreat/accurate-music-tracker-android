@@ -275,42 +275,60 @@ class MediaSessionCoordinator(
     private fun reconcileSessionsLocked(
         controllers: List<TrackedMediaController>
     ): List<CompletedListenSession> {
-        val emitted = mutableListOf<CompletedListenSession>()
         val eligible = controllers.filter { it.packageName in allowedPackages }
-        val eligibleByToken = LinkedHashMap<Any, TrackedMediaController>(eligible.size)
-        for (controller in eligible) {
-            eligibleByToken.putIfAbsent(controller.tokenId, controller)
+        if (eligible.isEmpty() && attachedControllers.isEmpty() && focusedTokenId == null) {
+            return emptyList()
         }
 
-        // Detach controllers that are no longer active or no longer allowlisted.
-        val removedTokens = attachedControllers.keys.filter { it !in eligibleByToken }
-        for (tokenId in removedTokens) {
-            val removed = attachedControllers.remove(tokenId) ?: continue
-            runCatching { removed.controller.unregisterCallback() }
-            if (focusedTokenId == tokenId) {
-                focusedTokenId = null
-                emitted += playSessionEngine.onSessionEnded(removed.controller.packageName)
+        val emitted = mutableListOf<CompletedListenSession>()
+        if (hasIdenticalTokenOrder(eligible)) {
+            val focusedPlaying = focusedTokenId != null &&
+                attachedControllers[focusedTokenId]?.cachedState?.status == PlaybackStatus.PLAYING
+            if (focusedPlaying) {
+                return emptyList()
             }
-        }
+            val anyPlaying = attachedControllers.values.any {
+                it.cachedState?.status == PlaybackStatus.PLAYING
+            }
+            if (!anyPlaying) {
+                return emptyList()
+            }
+        } else {
+            val eligibleByToken = LinkedHashMap<Any, TrackedMediaController>(eligible.size)
+            for (controller in eligible) {
+                eligibleByToken.putIfAbsent(controller.tokenId, controller)
+            }
 
-        // Rebuild attachedControllers in incoming priority order, reusing already-attached entries.
-        val reordered = LinkedHashMap<Any, AttachedEntry>(eligibleByToken.size)
-        for ((tokenId, controller) in eligibleByToken) {
-            val existing = attachedControllers[tokenId]
-            if (existing != null) {
-                reordered[tokenId] = existing
-            } else {
-                val entry = AttachedEntry(
-                    controller = controller,
-                    cachedMetadata = controller.currentMetadata,
-                    cachedState = controller.currentPlaybackState
-                )
-                reordered[tokenId] = entry
-                controller.registerCallback(createListener(tokenId))
+            // Detach controllers that are no longer active or no longer allowlisted.
+            val removedTokens = attachedControllers.keys.filter { it !in eligibleByToken }
+            for (tokenId in removedTokens) {
+                val removed = attachedControllers.remove(tokenId) ?: continue
+                runCatching { removed.controller.unregisterCallback() }
+                if (focusedTokenId == tokenId) {
+                    focusedTokenId = null
+                    emitted += playSessionEngine.onSessionEnded(removed.controller.packageName)
+                }
             }
+
+            // Rebuild attachedControllers in incoming priority order, reusing already-attached entries.
+            val reordered = LinkedHashMap<Any, AttachedEntry>(eligibleByToken.size)
+            for ((tokenId, controller) in eligibleByToken) {
+                val existing = attachedControllers[tokenId]
+                if (existing != null) {
+                    reordered[tokenId] = existing
+                } else {
+                    val entry = AttachedEntry(
+                        controller = controller,
+                        cachedMetadata = controller.currentMetadata,
+                        cachedState = controller.currentPlaybackState
+                    )
+                    reordered[tokenId] = entry
+                    controller.registerCallback(createListener(tokenId))
+                }
+            }
+            attachedControllers.clear()
+            attachedControllers.putAll(reordered)
         }
-        attachedControllers.clear()
-        attachedControllers.putAll(reordered)
 
         // Focus selection: keep valid PLAYING focus, or pick the highest-priority PLAYING controller.
         if (focusedTokenId == null || focusedTokenId !in attachedControllers) {
@@ -343,6 +361,17 @@ class MediaSessionCoordinator(
         return emitted
     }
 
+    private fun hasIdenticalTokenOrder(eligible: List<TrackedMediaController>): Boolean {
+        if (eligible.size != attachedControllers.size) return false
+        val iterator = attachedControllers.keys.iterator()
+        for (controller in eligible) {
+            if (!iterator.hasNext() || iterator.next() != controller.tokenId) {
+                return false
+            }
+        }
+        return true
+    }
+
     private fun createListener(tokenId: Any): TrackedMediaController.Listener =
         object : TrackedMediaController.Listener {
             override fun onMetadataChanged(metadata: MediaMetadataSnapshot?) {
@@ -365,16 +394,15 @@ class MediaSessionCoordinator(
         val emitted = synchronized(stateLock) {
             val entry = attachedControllers[tokenId] ?: return
             entry.cachedMetadata = metadata
-            val results = if (focusedTokenId == tokenId && metadata != null) {
-                playSessionEngine.onPlaybackEvent(
-                    PlaybackEvent.MetadataChanged(
-                        sourcePackage = entry.controller.packageName,
-                        metadata = metadata
-                    )
-                )
-            } else {
-                emptyList()
+            if (focusedTokenId != tokenId || metadata == null) {
+                return
             }
+            val results = playSessionEngine.onPlaybackEvent(
+                PlaybackEvent.MetadataChanged(
+                    sourcePackage = entry.controller.packageName,
+                    metadata = metadata
+                )
+            )
             updateSchedulersLocked()
             results
         }
@@ -388,10 +416,15 @@ class MediaSessionCoordinator(
         if (state == null) return
         val emitted = synchronized(stateLock) {
             val entry = attachedControllers[tokenId] ?: return
+            if (entry.cachedState == state && state.status != PlaybackStatus.PLAYING) {
+                return
+            }
             entry.cachedState = state
             val results = mutableListOf<CompletedListenSession>()
+            var engineTouched = false
 
             if (focusedTokenId == tokenId) {
+                engineTouched = true
                 results += playSessionEngine.onPlaybackEvent(
                     PlaybackEvent.StateChanged(
                         sourcePackage = entry.controller.packageName,
@@ -403,6 +436,7 @@ class MediaSessionCoordinator(
                     selectFallbackFocusLocked(results)
                 }
             } else if (state.status == PlaybackStatus.PLAYING) {
+                engineTouched = true
                 val previousFocused = focusedTokenId?.let { attachedControllers[it] }
                 focusedTokenId = tokenId
                 if (
@@ -421,7 +455,9 @@ class MediaSessionCoordinator(
             }
             // Non-focused PAUSED / STOPPED / BUFFERING updates are cached only and ignored.
 
-            updateSchedulersLocked()
+            if (engineTouched) {
+                updateSchedulersLocked()
+            }
             results
         }
         persistSessionsAsync(emitted)
@@ -439,8 +475,8 @@ class MediaSessionCoordinator(
                 focusedTokenId = null
                 results += playSessionEngine.onSessionEnded(removed.controller.packageName)
                 selectFallbackFocusLocked(results)
+                updateSchedulersLocked()
             }
-            updateSchedulersLocked()
             results
         }
         persistSessionsAsync(emitted)

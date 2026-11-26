@@ -1,6 +1,5 @@
 package com.musictracker.app.ui.screens.home
 
-import android.os.Build
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -35,6 +34,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -42,7 +42,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -62,7 +61,9 @@ import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import com.musictracker.app.domain.clock.TrackerClock
 import com.musictracker.app.domain.model.ListeningSummary
 import com.musictracker.app.domain.model.NowTrackingState
@@ -193,7 +194,7 @@ fun HomeScreenContent(
     ) {
         item(key = "home_header") {
             Text(
-                text = "Music Tracker",
+                text = "Collecto",
                 style = MaterialTheme.typography.headlineMedium,
                 color = colors.labelPrimary
             )
@@ -396,33 +397,10 @@ private fun NowTrackingGlassCard(
         return
     }
 
-    var liveListenedMs by remember(
-        nowTracking.sourcePackage,
-        nowTracking.normalizedTitle,
-        nowTracking.normalizedArtist,
-        nowTracking.accumulatedMs,
-        nowTracking.isPlaying,
-        nowTracking.segmentStartElapsedMs
-    ) {
-        mutableLongStateOf(computeLiveListenedMs(nowTracking, clock.elapsedRealtimeMs()))
-    }
-
-    LaunchedEffect(
-        nowTracking.sourcePackage,
-        nowTracking.normalizedTitle,
-        nowTracking.normalizedArtist,
-        nowTracking.accumulatedMs,
-        nowTracking.isPlaying,
-        nowTracking.segmentStartElapsedMs
-    ) {
-        liveListenedMs = computeLiveListenedMs(nowTracking, clock.elapsedRealtimeMs())
-        if (nowTracking.isPlaying && nowTracking.segmentStartElapsedMs != null) {
-            while (isActive) {
-                delay(1_000L)
-                liveListenedMs = computeLiveListenedMs(nowTracking, clock.elapsedRealtimeMs())
-            }
-        }
-    }
+    val liveListenedMsState = rememberLiveListenedMsState(
+        nowTracking = nowTracking,
+        clock = clock
+    )
 
     val artworkSeed = "${nowTracking.normalizedTitle}|${nowTracking.normalizedArtist}"
     val ambientColors = remember(artworkSeed) { deterministicArtworkColors(artworkSeed) }
@@ -433,6 +411,9 @@ private fun NowTrackingGlassCard(
     val sourceAppName = remember(nowTracking.sourcePackage) {
         formatSourceAppName(nowTracking.sourcePackage)
     }
+    val ambientBackdropBrush = remember(ambientColors) {
+        Brush.linearGradient(listOf(ambientColors.first, ambientColors.second))
+    }
 
     Box(
         modifier = modifier
@@ -440,17 +421,11 @@ private fun NowTrackingGlassCard(
             .clip(LiquidGlassShapes.HeroCard)
     ) {
         // Rich media ambient backdrop behind Clear Liquid Glass
-        val backdropModifier = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !accessibility.reduceTransparency) {
-            Modifier
+        Box(
+            modifier = Modifier
                 .matchParentSize()
-                .background(Brush.linearGradient(listOf(ambientColors.first, ambientColors.second)))
-                .blur(18.dp)
-        } else {
-            Modifier
-                .matchParentSize()
-                .background(Brush.linearGradient(listOf(ambientColors.first, ambientColors.second)))
-        }
-        Box(modifier = backdropModifier)
+                .background(ambientBackdropBrush)
+        )
 
         // Ensure dark contrast base over ambient artwork so Clear glass stays crisp
         if (!isBrightMedia && !accessibility.reduceTransparency) {
@@ -570,37 +545,108 @@ private fun NowTrackingGlassCard(
                         }
                     }
 
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text(
-                            text = formatLiveCounter(liveListenedMs),
-                            style = MaterialTheme.typography.headlineSmall.withTabularNumerals(),
-                            color = foregroundPrimary,
-                            modifier = Modifier.testTag(TestTags.HOME_LIVE_COUNTER)
-                        )
-                        Text(
-                            text = "Listened",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = foregroundSecondary
-                        )
-                    }
+                    NowTrackingLiveCounter(
+                        liveListenedMsState = liveListenedMsState,
+                        primaryColor = foregroundPrimary,
+                        secondaryColor = foregroundSecondary
+                    )
                 }
 
                 if (nowTracking.durationMs > 0L) {
-                    val progress = (liveListenedMs.toFloat() / nowTracking.durationMs.toFloat())
-                        .coerceIn(0f, 1f)
-                    LinearProgressIndicator(
-                        progress = { progress },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(4.dp)
-                            .clip(CircleShape),
-                        color = foregroundPrimary,
-                        trackColor = foregroundPrimary.copy(alpha = 0.24f)
+                    NowTrackingProgressBar(
+                        liveListenedMsState = liveListenedMsState,
+                        durationMs = nowTracking.durationMs,
+                        color = foregroundPrimary
                     )
                 }
             }
         }
     }
+}
+
+@Composable
+private fun rememberLiveListenedMsState(
+    nowTracking: NowTrackingState,
+    clock: TrackerClock
+): State<Long> {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val liveListenedMs = remember(
+        nowTracking.sourcePackage,
+        nowTracking.normalizedTitle,
+        nowTracking.normalizedArtist,
+        nowTracking.accumulatedMs,
+        nowTracking.isPlaying,
+        nowTracking.segmentStartElapsedMs
+    ) {
+        mutableLongStateOf(computeLiveListenedMs(nowTracking, clock.elapsedRealtimeMs()))
+    }
+
+    LaunchedEffect(
+        lifecycleOwner,
+        nowTracking.sourcePackage,
+        nowTracking.normalizedTitle,
+        nowTracking.normalizedArtist,
+        nowTracking.accumulatedMs,
+        nowTracking.isPlaying,
+        nowTracking.segmentStartElapsedMs
+    ) {
+        liveListenedMs.longValue = computeLiveListenedMs(nowTracking, clock.elapsedRealtimeMs())
+        if (nowTracking.isPlaying && nowTracking.segmentStartElapsedMs != null) {
+            lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                liveListenedMs.longValue = computeLiveListenedMs(nowTracking, clock.elapsedRealtimeMs())
+                while (isActive) {
+                    delay(1_000L)
+                    liveListenedMs.longValue = computeLiveListenedMs(nowTracking, clock.elapsedRealtimeMs())
+                }
+            }
+        }
+    }
+    return liveListenedMs
+}
+
+@Composable
+private fun NowTrackingLiveCounter(
+    liveListenedMsState: State<Long>,
+    primaryColor: Color,
+    secondaryColor: Color,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.End
+    ) {
+        Text(
+            text = formatLiveCounter(liveListenedMsState.value),
+            style = MaterialTheme.typography.headlineSmall.withTabularNumerals(),
+            color = primaryColor,
+            modifier = Modifier.testTag(TestTags.HOME_LIVE_COUNTER)
+        )
+        Text(
+            text = "Listened",
+            style = MaterialTheme.typography.labelSmall,
+            color = secondaryColor
+        )
+    }
+}
+
+@Composable
+private fun NowTrackingProgressBar(
+    liveListenedMsState: State<Long>,
+    durationMs: Long,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    LinearProgressIndicator(
+        progress = {
+            (liveListenedMsState.value.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+        },
+        modifier = modifier
+            .fillMaxWidth()
+            .height(4.dp)
+            .clip(CircleShape),
+        color = color,
+        trackColor = color.copy(alpha = 0.24f)
+    )
 }
 
 @Composable
