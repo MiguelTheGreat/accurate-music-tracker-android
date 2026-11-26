@@ -1,0 +1,242 @@
+package com.musictracker.app.ui.screens.settings
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewModelScope
+import com.musictracker.app.data.export.DataExporter
+import com.musictracker.app.data.preferences.AccessibilityPreferencesStore
+import com.musictracker.app.data.preferences.AllowlistRepository
+import com.musictracker.app.di.AppContainer
+import com.musictracker.app.domain.model.ExportResult
+import com.musictracker.app.tracking.InstalledAppInfo
+import com.musictracker.app.tracking.SystemPermissionHelper
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.OutputStream
+
+class SettingsViewModel(
+    private val systemPermissionHelper: SystemPermissionHelper,
+    private val allowlistRepository: AllowlistRepository,
+    private val reduceTransparencyFlow: Flow<Boolean>,
+    private val setReduceTransparency: suspend (Boolean) -> Unit,
+    private val dataExporter: DataExporter,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
+) : ViewModel() {
+
+    constructor(
+        systemPermissionHelper: SystemPermissionHelper,
+        allowlistRepository: AllowlistRepository,
+        accessibilityPreferencesStore: AccessibilityPreferencesStore,
+        dataExporter: DataExporter,
+        ioDispatcher: CoroutineDispatcher = Dispatchers.IO
+    ) : this(
+        systemPermissionHelper = systemPermissionHelper,
+        allowlistRepository = allowlistRepository,
+        reduceTransparencyFlow = accessibilityPreferencesStore.reduceTransparencyEnabled,
+        setReduceTransparency = { enabled ->
+            accessibilityPreferencesStore.setReduceTransparencyEnabled(enabled)
+        },
+        dataExporter = dataExporter,
+        ioDispatcher = ioDispatcher
+    )
+
+    private val isNotificationAccessGrantedFlow = MutableStateFlow(
+        systemPermissionHelper.isNotificationAccessGranted()
+    )
+    private val isIgnoringBatteryOptimizationsFlow = MutableStateFlow(
+        systemPermissionHelper.isIgnoringBatteryOptimizations()
+    )
+    private val searchQueryFlow = MutableStateFlow("")
+    private val installedAppsFlow = MutableStateFlow<List<InstalledAppInfo>>(emptyList())
+    private val isLoadingAppsFlow = MutableStateFlow(true)
+    private val exportStateFlow = MutableStateFlow<ExportUiState>(ExportUiState.Idle)
+
+    private val filteredAppsFlow = combine(
+        installedAppsFlow,
+        allowlistRepository.allowedPackages,
+        searchQueryFlow
+    ) { installedApps, allowedPackages, query ->
+        val trimmedQuery = query.trim()
+        installedApps
+            .map { info ->
+                AllowlistAppItem(
+                    packageName = info.packageName,
+                    appName = info.appName,
+                    isAllowed = info.packageName in allowedPackages,
+                    isDefaultMusicApp = info.isDefaultMusicApp
+                )
+            }
+            .filter { item ->
+                trimmedQuery.isEmpty() ||
+                    item.appName.contains(trimmedQuery, ignoreCase = true) ||
+                    item.packageName.contains(trimmedQuery, ignoreCase = true)
+            }
+            .sortedWith(
+                compareByDescending<AllowlistAppItem> { it.isDefaultMusicApp }
+                    .thenByDescending { it.isAllowed }
+                    .thenBy { it.appName.lowercase() }
+                    .thenBy { it.packageName }
+            )
+    }
+
+    private data class SystemStatusSnapshot(
+        val hasNotifAccess: Boolean,
+        val isIgnoringBattery: Boolean,
+        val searchQuery: String
+    )
+
+    private val systemStatusFlow = combine(
+        isNotificationAccessGrantedFlow,
+        isIgnoringBatteryOptimizationsFlow,
+        searchQueryFlow
+    ) { hasNotif, isIgnoringBattery, query ->
+        SystemStatusSnapshot(hasNotif, isIgnoringBattery, query)
+    }
+
+    val uiState: StateFlow<SettingsUiState> = combine(
+        systemStatusFlow,
+        filteredAppsFlow,
+        isLoadingAppsFlow,
+        exportStateFlow,
+        reduceTransparencyFlow
+    ) { status, filteredApps, isLoadingApps, exportState, reduceTransparency ->
+        SettingsUiState(
+            isNotificationAccessGranted = status.hasNotifAccess,
+            isIgnoringBatteryOptimizations = status.isIgnoringBattery,
+            searchQuery = status.searchQuery,
+            filteredApps = filteredApps,
+            isLoadingApps = isLoadingApps,
+            exportState = exportState,
+            reduceTransparencyEnabled = reduceTransparency
+        )
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000L),
+        initialValue = SettingsUiState(
+            isNotificationAccessGranted = isNotificationAccessGrantedFlow.value,
+            isIgnoringBatteryOptimizations = isIgnoringBatteryOptimizationsFlow.value,
+            isLoadingApps = true
+        )
+    )
+
+    init {
+        loadInstalledApps()
+    }
+
+    fun loadInstalledApps() {
+        viewModelScope.launch {
+            isLoadingAppsFlow.value = true
+            val apps = withContext(ioDispatcher) {
+                runCatching { systemPermissionHelper.getInstalledLaunchableApps() }
+                    .getOrDefault(emptyList())
+            }
+            installedAppsFlow.value = apps
+            isLoadingAppsFlow.value = false
+        }
+    }
+
+    fun refreshSystemStatus() {
+        isNotificationAccessGrantedFlow.value = systemPermissionHelper.isNotificationAccessGranted()
+        isIgnoringBatteryOptimizationsFlow.value = systemPermissionHelper.isIgnoringBatteryOptimizations()
+    }
+
+    fun onSearchQueryChange(query: String) {
+        searchQueryFlow.value = query
+    }
+
+    fun onToggleAppAllowed(packageName: String, allowed: Boolean) {
+        viewModelScope.launch {
+            allowlistRepository.setPackageAllowed(packageName, allowed)
+        }
+    }
+
+    fun onToggleReduceTransparency(enabled: Boolean) {
+        viewModelScope.launch {
+            setReduceTransparency(enabled)
+        }
+    }
+
+    fun exportJson(openOutputStream: () -> OutputStream?) {
+        runExport(ExportFormat.JSON, openOutputStream) { stream ->
+            dataExporter.exportJson(stream)
+        }
+    }
+
+    fun exportSqliteBackup(openOutputStream: () -> OutputStream?) {
+        runExport(ExportFormat.SQLITE, openOutputStream) { stream ->
+            dataExporter.exportSqliteBackup(stream)
+        }
+    }
+
+    fun clearExportFeedback() {
+        if (exportStateFlow.value !is ExportUiState.InProgress) {
+            exportStateFlow.value = ExportUiState.Idle
+        }
+    }
+
+    private fun runExport(
+        format: ExportFormat,
+        openOutputStream: () -> OutputStream?,
+        exporterAction: suspend (OutputStream) -> ExportResult
+    ) {
+        if (exportStateFlow.value is ExportUiState.InProgress) return
+        exportStateFlow.value = ExportUiState.InProgress(format)
+
+        viewModelScope.launch {
+            val result = withContext(ioDispatcher) {
+                runCatching {
+                    val stream = openOutputStream()
+                        ?: return@runCatching ExportResult.Error("Unable to open destination file")
+                    stream.use { outputStream ->
+                        exporterAction(outputStream)
+                    }
+                }.getOrElse { throwable ->
+                    ExportResult.Error(
+                        message = throwable.message ?: "Export failed unexpectedly",
+                        cause = throwable
+                    )
+                }
+            }
+
+            exportStateFlow.value = when (result) {
+                is ExportResult.Success -> {
+                    val label = if (format == ExportFormat.JSON) "JSON export" else "SQLite backup"
+                    val kb = (result.bytesWritten / 1024L).coerceAtLeast(1L)
+                    ExportUiState.Success(
+                        format = format,
+                        message = "$label complete (${result.trackCount} tracks, ${result.listenEventCount} listens, ${kb} KB)"
+                    )
+                }
+
+                is ExportResult.Error -> ExportUiState.Error(
+                    format = format,
+                    message = result.message
+                )
+            }
+        }
+    }
+
+    companion object {
+        fun factory(appContainer: AppContainer): ViewModelProvider.Factory =
+            object : ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                    return SettingsViewModel(
+                        systemPermissionHelper = appContainer.systemPermissionHelper,
+                        allowlistRepository = appContainer.allowlistRepository,
+                        accessibilityPreferencesStore = appContainer.accessibilityPreferencesStore,
+                        dataExporter = appContainer.dataExporter,
+                        ioDispatcher = appContainer.ioDispatcher
+                    ) as T
+                }
+            }
+    }
+}
