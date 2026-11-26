@@ -2,9 +2,10 @@ package com.musictracker.app.ui.navigation
 
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -40,7 +41,41 @@ import com.musictracker.app.ui.screens.stats.StatsRoute
 import com.musictracker.app.ui.screens.stats.StatsViewModel
 import com.musictracker.app.ui.theme.LiquidGlassTheme
 
-private const val NAV_TRANSITION_DURATION_MS = 120
+private const val NAV_TRANSITION_DURATION_MS = 260
+
+private fun directionalEnterTransition(
+    fromRoute: String?,
+    toRoute: String?,
+    reduceMotion: Boolean
+): EnterTransition {
+    if (reduceMotion) return EnterTransition.None
+    val direction = tabTransitionDirection(fromRoute, toRoute)
+    if (direction == 0) return EnterTransition.None
+    return slideInHorizontally(
+        animationSpec = tween(
+            durationMillis = NAV_TRANSITION_DURATION_MS,
+            easing = FastOutSlowInEasing
+        ),
+        initialOffsetX = { fullWidth -> if (direction > 0) fullWidth else -fullWidth }
+    )
+}
+
+private fun directionalExitTransition(
+    fromRoute: String?,
+    toRoute: String?,
+    reduceMotion: Boolean
+): ExitTransition {
+    if (reduceMotion) return ExitTransition.None
+    val direction = tabTransitionDirection(fromRoute, toRoute)
+    if (direction == 0) return ExitTransition.None
+    return slideOutHorizontally(
+        animationSpec = tween(
+            durationMillis = NAV_TRANSITION_DURATION_MS,
+            easing = FastOutSlowInEasing
+        ),
+        targetOffsetX = { fullWidth -> if (direction > 0) -fullWidth else fullWidth }
+    )
+}
 
 @Composable
 fun MusicTrackerNavHost(
@@ -135,24 +170,37 @@ fun MusicTrackerNavHost(
             }
         }
     ) {
-        val enterAnim = if (accessibility.reduceMotion) {
-            EnterTransition.None
-        } else {
-            fadeIn(animationSpec = tween(NAV_TRANSITION_DURATION_MS))
-        }
-        val exitAnim = if (accessibility.reduceMotion) {
-            ExitTransition.None
-        } else {
-            fadeOut(animationSpec = tween(NAV_TRANSITION_DURATION_MS))
-        }
-
         NavHost(
             navController = navController,
             startDestination = AppDestination.HOME.route,
-            enterTransition = { enterAnim },
-            exitTransition = { exitAnim },
-            popEnterTransition = { enterAnim },
-            popExitTransition = { exitAnim },
+            enterTransition = {
+                directionalEnterTransition(
+                    fromRoute = initialState.destination.route,
+                    toRoute = targetState.destination.route,
+                    reduceMotion = accessibility.reduceMotion
+                )
+            },
+            exitTransition = {
+                directionalExitTransition(
+                    fromRoute = initialState.destination.route,
+                    toRoute = targetState.destination.route,
+                    reduceMotion = accessibility.reduceMotion
+                )
+            },
+            popEnterTransition = {
+                directionalEnterTransition(
+                    fromRoute = initialState.destination.route,
+                    toRoute = targetState.destination.route,
+                    reduceMotion = accessibility.reduceMotion
+                )
+            },
+            popExitTransition = {
+                directionalExitTransition(
+                    fromRoute = initialState.destination.route,
+                    toRoute = targetState.destination.route,
+                    reduceMotion = accessibility.reduceMotion
+                )
+            },
             modifier = Modifier
                 .fillMaxSize()
                 .nestedScroll(navScrollConnection)
