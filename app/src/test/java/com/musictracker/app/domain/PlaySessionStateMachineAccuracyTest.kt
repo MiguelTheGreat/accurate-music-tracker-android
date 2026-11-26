@@ -462,4 +462,134 @@ class PlaySessionStateMachineAccuracyTest {
             paused.accumulatedMs
         )
     }
+
+    @Test
+    fun pauseOver20sAndResumeAtSamePosition_resumesPlayingAndAccumulatesFullTime() {
+        val clock = FakeClock(elapsedMs = 10_000L)
+        val engine = PlaySessionStateMachine(clock = clock, normalizer = MusicMetadataNormalizer())
+
+        engine.onPlaybackEvent(PlaybackEvent.MetadataChanged(pkg, blindingLights))
+        engine.onPlaybackEvent(
+            PlaybackEvent.StateChanged(
+                pkg,
+                PlaybackStateSnapshot(
+                    status = PlaybackStatus.PLAYING,
+                    positionMs = 0L,
+                    playbackSpeed = 1.0f,
+                    lastPositionUpdateTimeMs = clock.elapsedMs
+                )
+            )
+        )
+
+        // Play for 60s, receive PLAYING update at pos=60s, then pause at pos=60s.
+        clock.advanceBy(60_000L)
+        engine.onPlaybackEvent(
+            PlaybackEvent.StateChanged(
+                pkg,
+                PlaybackStateSnapshot(
+                    status = PlaybackStatus.PLAYING,
+                    positionMs = 60_000L,
+                    playbackSpeed = 1.0f,
+                    lastPositionUpdateTimeMs = clock.elapsedMs
+                )
+            )
+        )
+        engine.onPlaybackEvent(
+            PlaybackEvent.StateChanged(
+                pkg,
+                PlaybackStateSnapshot(
+                    status = PlaybackStatus.PAUSED,
+                    positionMs = 60_000L,
+                    playbackSpeed = 0f,
+                    lastPositionUpdateTimeMs = clock.elapsedMs
+                )
+            )
+        )
+        assertNotNull(engine.nowTracking.value)
+        assertFalse(engine.nowTracking.value!!.isPlaying)
+
+        // Pause for 45s (longer than 20s STALL_THRESHOLD_MS, within 3m idle timeout).
+        clock.advanceBy(45_000L)
+        engine.onPlaybackEvent(
+            PlaybackEvent.StateChanged(
+                pkg,
+                PlaybackStateSnapshot(
+                    status = PlaybackStatus.PLAYING,
+                    positionMs = 60_000L,
+                    playbackSpeed = 1.0f,
+                    lastPositionUpdateTimeMs = clock.elapsedMs
+                )
+            )
+        )
+        assertNotNull(engine.nowTracking.value)
+        assertTrue(
+            "Resuming from a 45s pause at the same position must not be treated as stalled",
+            engine.nowTracking.value!!.isPlaying
+        )
+
+        // Play remaining 140s and stop -> full 200_000ms must be recorded.
+        clock.advanceBy(140_000L)
+        val emitted = engine.onPlaybackEvent(
+            PlaybackEvent.StateChanged(pkg, PlaybackStateSnapshot(PlaybackStatus.STOPPED))
+        )
+        assertEquals(1, emitted.size)
+        assertEquals(200_000L, emitted[0].actualListenedMs)
+        assertFalse(emitted[0].wasSkipped)
+    }
+
+    @Test
+    fun autoAdvanceTrackB_survives60sLivenessPollWithStaleTrackAUpdateTime() {
+        val clock = FakeClock(elapsedMs = 10_000L)
+        val engine = PlaySessionStateMachine(clock = clock, normalizer = MusicMetadataNormalizer())
+        val t0 = clock.elapsedMs
+
+        val trackA = MediaMetadataSnapshot(
+            title = "Track A",
+            artist = "Artist A",
+            album = "Album A",
+            durationMs = 300_000L
+        )
+        val trackB = MediaMetadataSnapshot(
+            title = "Track B",
+            artist = "Artist B",
+            album = "Album B",
+            durationMs = 120_000L
+        )
+        val trackAPlayingState = PlaybackStateSnapshot(
+            status = PlaybackStatus.PLAYING,
+            positionMs = 0L,
+            playbackSpeed = 1.0f,
+            lastPositionUpdateTimeMs = t0
+        )
+
+        engine.onPlaybackEvent(PlaybackEvent.MetadataChanged(pkg, trackA))
+        engine.onPlaybackEvent(PlaybackEvent.StateChanged(pkg, trackAPlayingState))
+
+        // Track A plays uninterrupted for 300s, then auto-advances to Track B via MetadataChanged.
+        clock.advanceBy(300_000L)
+        val emittedA = engine.onPlaybackEvent(PlaybackEvent.MetadataChanged(pkg, trackB))
+        assertEquals(1, emittedA.size)
+        assertEquals("Track A", emittedA[0].rawTitle)
+        assertEquals(300_000L, emittedA[0].actualListenedMs)
+
+        // At T0 + 360s (60s into Track B), livenessJob polls carrying Track A's stale updateTime=T0.
+        clock.advanceBy(60_000L)
+        val pollEmitted = engine.onPlaybackEvent(PlaybackEvent.StateChanged(pkg, trackAPlayingState))
+        assertTrue("Stale liveness poll must not kill or finalize Track B", pollEmitted.isEmpty())
+
+        val midTrackB = engine.nowTracking.value
+        assertNotNull("Track B must remain alive after 60s liveness poll", midTrackB)
+        assertEquals("Track B", midTrackB!!.normalizedTitle)
+        assertTrue("Track B must remain actively playing", midTrackB.isPlaying)
+
+        // Track B completes cleanly at T0 + 420s with full 120_000ms.
+        clock.advanceBy(60_000L)
+        val emittedB = engine.onPlaybackEvent(
+            PlaybackEvent.StateChanged(pkg, PlaybackStateSnapshot(PlaybackStatus.STOPPED))
+        )
+        assertEquals(1, emittedB.size)
+        assertEquals("Track B", emittedB[0].rawTitle)
+        assertEquals(120_000L, emittedB[0].actualListenedMs)
+        assertFalse(emittedB[0].wasSkipped)
+    }
 }

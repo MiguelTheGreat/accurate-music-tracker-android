@@ -530,6 +530,7 @@ class PlaySessionStateMachine(
         session: SessionRecord,
         state: PlaybackStateSnapshot
     ): Boolean {
+        if (session.segmentStartElapsedMs == null) return false
         if (state.lastPositionUpdateTimeMs <= 0L || session.lastPositionUpdateElapsedMs <= 0L) {
             return false
         }
@@ -612,6 +613,11 @@ class PlaySessionStateMachine(
         state: PlaybackStateSnapshot,
         now: Long
     ) {
+        if (state.lastPositionUpdateTimeMs > 0L &&
+            state.lastPositionUpdateTimeMs < session.lastPositionUpdateElapsedMs
+        ) {
+            return
+        }
         if (state.positionMs >= 0L) {
             if (state.positionMs != session.lastPlayingPositionMs) {
                 session.lastRealProgressElapsedMs =
@@ -619,7 +625,7 @@ class PlaySessionStateMachine(
             }
             session.lastPlayingPositionMs = state.positionMs
         }
-        if (state.lastPositionUpdateTimeMs > 0L) {
+        if (state.lastPositionUpdateTimeMs > session.lastPositionUpdateElapsedMs) {
             if (session.lastPositionUpdateElapsedMs == 0L) {
                 session.lastRealProgressElapsedMs = state.lastPositionUpdateTimeMs
             }
@@ -771,7 +777,11 @@ class PlaySessionStateMachine(
             segmentStartElapsedMs = now,
             pausedSinceElapsedMs = null,
             lastPlayingPositionMs = initialPosMs.coerceAtLeast(0L),
-            lastPositionUpdateElapsedMs = state?.lastPositionUpdateTimeMs?.coerceAtLeast(0L) ?: 0L,
+            lastPositionUpdateElapsedMs = if (state != null) {
+                state.lastPositionUpdateTimeMs.coerceAtLeast(0L)
+            } else {
+                now
+            },
             lastRealProgressElapsedMs = now,
             lastPlaybackSpeed = state?.playbackSpeed?.takeIf { it > 0.05f && it.isFinite() } ?: 1.0f
         )
