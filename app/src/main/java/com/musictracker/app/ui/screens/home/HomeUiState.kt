@@ -14,6 +14,8 @@ data class HomeUiState(
     val recentHistory: List<RecentListenItem> = emptyList(),
     val isFullHistoryUnlocked: Boolean = false,
     val hasMoreHistory: Boolean = false,
+    val nowTrackingArtworkPath: String? = null,
+    val recentArtworkPaths: Map<Long, String> = emptyMap(),
     val isLoading: Boolean = true
 ) {
     val showPermissionBanner: Boolean

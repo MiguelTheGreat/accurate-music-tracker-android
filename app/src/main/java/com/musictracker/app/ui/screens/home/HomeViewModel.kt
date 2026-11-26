@@ -3,19 +3,27 @@ package com.musictracker.app.ui.screens.home
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.musictracker.app.data.artwork.ArtworkRepository
 import com.musictracker.app.data.repository.ListeningRepository
 import com.musictracker.app.di.AppContainer
 import com.musictracker.app.domain.clock.TrackerClock
+import com.musictracker.app.domain.model.NowTrackingState
+import com.musictracker.app.domain.model.RecentListenItem
+import com.musictracker.app.domain.normalization.MusicMetadataNormalizer
 import com.musictracker.app.domain.tracking.PlaySessionEngine
 import com.musictracker.app.tracking.SystemPermissionHelper
 import com.musictracker.app.ui.common.startOfTodayEpochMs
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import java.time.ZoneId
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -24,7 +32,8 @@ class HomeViewModel(
     private val playSessionEngine: PlaySessionEngine,
     private val systemPermissionHelper: SystemPermissionHelper,
     private val clock: TrackerClock,
-    private val zoneId: ZoneId = ZoneId.systemDefault()
+    private val zoneId: ZoneId = ZoneId.systemDefault(),
+    private val artworkRepository: ArtworkRepository? = null
 ) : ViewModel() {
 
     private val isNotificationAccessGrantedFlow = MutableStateFlow(
@@ -54,7 +63,10 @@ class HomeViewModel(
         Triple(visibleItems, unlocked, hasMore)
     }
 
-    val uiState: StateFlow<HomeUiState> = combine(
+    private val artworkRevisionFlow: Flow<Int> =
+        artworkRepository?.artworkRevision ?: flowOf(0)
+
+    private val baseUiStateFlow: Flow<HomeUiState> = combine(
         playSessionEngine.nowTracking,
         todaySummaryFlow,
         historyStateFlow,
@@ -72,6 +84,43 @@ class HomeViewModel(
             hasMoreHistory = hasMore,
             isLoading = false
         )
+    }.onEach { state ->
+        if (artworkRepository != null) {
+            prefetchHomeArtwork(
+                nowTracking = state.nowTracking,
+                recentHistory = state.recentHistory
+            )
+        }
+    }
+
+    val uiState: StateFlow<HomeUiState> = combine(
+        baseUiStateFlow,
+        artworkRevisionFlow
+    ) { state, _ ->
+        val repo = artworkRepository
+        if (repo == null) {
+            state
+        } else {
+            val nowTrackingPath = state.nowTracking?.let { now ->
+                val dedupKey = MusicMetadataNormalizer.buildDedupKey(
+                    now.normalizedArtist,
+                    now.normalizedTitle
+                )
+                repo.getCachedTrackArtworkFile(dedupKey)?.absolutePath
+            }
+            val recentPaths = buildMap {
+                for (item in state.recentHistory) {
+                    val dedupKey = MusicMetadataNormalizer.buildDedupKey(item.artist, item.title)
+                    repo.getCachedTrackArtworkFile(dedupKey)?.absolutePath?.let { path ->
+                        put(item.eventId, path)
+                    }
+                }
+            }
+            state.copy(
+                nowTrackingArtworkPath = nowTrackingPath,
+                recentArtworkPaths = recentPaths
+            )
+        }
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000L),
@@ -80,6 +129,42 @@ class HomeViewModel(
             isLoading = true
         )
     )
+
+    private fun prefetchHomeArtwork(
+        nowTracking: NowTrackingState?,
+        recentHistory: List<RecentListenItem>
+    ) {
+        val repo = artworkRepository ?: return
+        if (nowTracking != null) {
+            val dedupKey = MusicMetadataNormalizer.buildDedupKey(
+                nowTracking.normalizedArtist,
+                nowTracking.normalizedTitle
+            )
+            if (repo.getCachedTrackArtworkFile(dedupKey) == null) {
+                viewModelScope.launch {
+                    repo.resolveTrackArtwork(
+                        dedupKey = dedupKey,
+                        artist = nowTracking.normalizedArtist,
+                        title = nowTracking.normalizedTitle,
+                        rawArtworkUri = nowTracking.artworkUri
+                    )
+                }
+            }
+        }
+        for (item in recentHistory.take(INITIAL_RECENT_HISTORY_LIMIT)) {
+            val dedupKey = MusicMetadataNormalizer.buildDedupKey(item.artist, item.title)
+            if (repo.getCachedTrackArtworkFile(dedupKey) == null) {
+                viewModelScope.launch {
+                    repo.resolveTrackArtwork(
+                        dedupKey = dedupKey,
+                        artist = item.artist,
+                        title = item.title,
+                        rawArtworkUri = item.artworkUri
+                    )
+                }
+            }
+        }
+    }
 
     fun refreshPermissionAndDay() {
         val hasAccess = systemPermissionHelper.isNotificationAccessGranted()
@@ -114,7 +199,8 @@ class HomeViewModel(
                         listeningRepository = appContainer.listeningRepository,
                         playSessionEngine = appContainer.playSessionEngine,
                         systemPermissionHelper = appContainer.systemPermissionHelper,
-                        clock = appContainer.clock
+                        clock = appContainer.clock,
+                        artworkRepository = appContainer.artworkRepository
                     ) as T
                 }
             }

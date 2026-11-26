@@ -277,9 +277,9 @@ Release 2.0 rebrands the user-facing app to **Collecto** (`versionName = "2.0.0"
 
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|--------------|--------|
-| M6 | Rebrand, Manifest/Deps Prep & Power Efficiency (Background + UI) | F28, F29 + lean targeted unit tests + commit & push to `origin/main` | M5 (`3a56176`) | IN_PROGRESS |
-| M7 | Interactive Liquid Glass Bottom Bar & Directional Slide Transitions | F30, F31 + lean targeted unit tests + commit & push to `origin/main` | M6 | PLANNED |
-| M8 | Offline-First Cover Art & Artist Platform Photos | F32 + lean targeted unit tests + commit & push to `origin/main` | M6 | PLANNED |
-| M9 | Collecto Insights (Drill-Down, Streaks, Peak Hours) & Native Sharing | F33, F34, F35, F36 + lean targeted unit tests + commit & push to `origin/main` | M7, M8 | PLANNED |
-| M10 | Jetpack Glance Widget, Final Verification & GitHub Release `v2.0.0` | F37 + lean targeted unit test + full test/lint/debug+release APK verification + commit/push + `gh release create v2.0.0` | M9 | PLANNED |
+| M6 | Rebrand, Manifest/Deps Prep & Power Efficiency (Background + UI) | F28, F29 + lean targeted unit tests + commit & push to `origin/main` | M5 (`3a56176`) | DONE (`72a1a7b`, 211/211 tests, 0 lint errors, CLEAN audit) |
+| M7 | Interactive Liquid Glass Bottom Bar & Directional Slide Transitions | F30, F31 (unit tests deferred to M10 Phase 2) + commit & push to `origin/main` | M6 | DONE (`46da2e8`) |
+| M8 | Offline-First Cover Art & Artist Platform Photos | F32 (unit tests deferred to M10 Phase 2) + commit & push to `origin/main` | M6 | DONE (`796f8b4`) |
+| M9 | Collecto Insights (Drill-Down, Streaks, Peak Hours) & Native Sharing | F33, F34, F35, F36 (unit tests deferred to M10 Phase 2) + commit & push to `origin/main` | M6 | DONE (`0a2673e`) |
+| M10 | Wiring + `v2.0.0-preview` (Phase 1) → Glance Widget, Unit Tests, Verification & `v2.0.0` (Phase 2) | Phase 1: wire M7+M8+M9 + clean APK build + `v2.0.0-preview`; Phase 2: Glance widget + targeted unit tests + full verification + `v2.0.0` | M7, M8, M9 | IN_PROGRESS (Phase 1) |
 

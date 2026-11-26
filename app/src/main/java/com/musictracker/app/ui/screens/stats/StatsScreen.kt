@@ -41,10 +41,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -56,10 +54,10 @@ import com.musictracker.app.domain.model.TopArtistStat
 import com.musictracker.app.domain.model.TopTrackStat
 import com.musictracker.app.ui.common.formatSkipRate
 import com.musictracker.app.ui.common.formatSummaryDuration
+import com.musictracker.app.ui.components.content.ArtistAvatar
 import com.musictracker.app.ui.components.content.ArtworkThumbnail
 import com.musictracker.app.ui.components.content.EmptyStateView
 import com.musictracker.app.ui.components.content.StandardMaterialCard
-import com.musictracker.app.ui.components.content.deterministicArtworkColors
 import com.musictracker.app.ui.components.glass.LiquidGlassButton
 import com.musictracker.app.ui.components.glass.LiquidGlassSegmentedControl
 import com.musictracker.app.ui.components.glass.LiquidGlassVariant
@@ -106,6 +104,8 @@ fun StatsRoute(
             trackDetail = uiState.selectedTrackDetail,
             artistDetail = uiState.selectedArtistDetail,
             artistTopTracks = uiState.selectedArtistTopTracks,
+            artistArtworkPaths = uiState.artistArtworkPaths,
+            trackArtworkPaths = uiState.trackArtworkPaths,
             onShareTrack = { track ->
                 viewModel.dismissDrillDown()
                 shareSheetConfig = ShareSheetInitialConfig(
@@ -322,6 +322,7 @@ fun StatsScreenContent(
                                 if (topFiveTracks.isNotEmpty()) {
                                     TopTracksCard(
                                         tracks = topFiveTracks,
+                                        trackArtworkPaths = uiState.trackArtworkPaths,
                                         onTrackClick = onTrackClick,
                                         modifier = Modifier.testTag(TestTags.STATS_TOP_TRACKS_LIST)
                                     )
@@ -336,6 +337,7 @@ fun StatsScreenContent(
                                 if (topFiveArtists.isNotEmpty()) {
                                     TopArtistsCard(
                                         artists = topFiveArtists,
+                                        artistArtworkPaths = uiState.artistArtworkPaths,
                                         onArtistClick = onArtistClick,
                                         modifier = Modifier.testTag(TestTags.STATS_TOP_ARTISTS_LIST)
                                     )
@@ -427,6 +429,7 @@ private fun OverviewMetric(
 @Composable
 private fun TopTracksCard(
     tracks: List<TopTrackStat>,
+    trackArtworkPaths: Map<Long, String> = emptyMap(),
     onTrackClick: (TopTrackStat) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -445,6 +448,7 @@ private fun TopTracksCard(
             TopTrackRow(
                 rank = index + 1,
                 track = track,
+                resolvedArtworkPath = trackArtworkPaths[track.trackId],
                 relativeRatio = ratio,
                 onClick = { onTrackClick(track) },
                 modifier = Modifier.testTag(TestTags.statsTrackItem(track.trackId))
@@ -463,6 +467,7 @@ private fun TopTracksCard(
 private fun TopTrackRow(
     rank: Int,
     track: TopTrackStat,
+    resolvedArtworkPath: String?,
     relativeRatio: Float,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -495,7 +500,7 @@ private fun TopTrackRow(
                 modifier = Modifier.width(28.dp)
             )
             ArtworkThumbnail(
-                artworkUri = track.artworkUri,
+                artworkUri = resolvedArtworkPath ?: track.artworkUri,
                 fallbackSeed = "${track.title}|${track.artist}",
                 contentDescription = track.title,
                 size = 44.dp,
@@ -544,6 +549,7 @@ private fun TopTrackRow(
 @Composable
 private fun TopArtistsCard(
     artists: List<TopArtistStat>,
+    artistArtworkPaths: Map<String, String> = emptyMap(),
     onArtistClick: (TopArtistStat) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -562,6 +568,7 @@ private fun TopArtistsCard(
             TopArtistRow(
                 rank = index + 1,
                 artist = artist,
+                resolvedArtworkPath = artistArtworkPaths[artist.artist],
                 relativeRatio = ratio,
                 onClick = { onArtistClick(artist) },
                 modifier = Modifier.testTag(TestTags.statsArtistItem(index))
@@ -580,6 +587,7 @@ private fun TopArtistsCard(
 private fun TopArtistRow(
     rank: Int,
     artist: TopArtistStat,
+    resolvedArtworkPath: String?,
     relativeRatio: Float,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -591,16 +599,6 @@ private fun TopArtistRow(
         animationSpec = LiquidGlassMotion.fluidSpec(accessibility.reduceMotion),
         label = "artist_bar_ratio"
     )
-    val avatarColors = remember(artist.artist) { deterministicArtworkColors(artist.artist) }
-    val monogram = remember(artist.artist) {
-        val trimmed = artist.artist.trim()
-        if (trimmed.isEmpty()) {
-            "?"
-        } else {
-            val cp = trimmed.codePointAt(0)
-            String(Character.toChars(Character.toUpperCase(cp)))
-        }
-    }
     val playLabel = if (artist.playCount == 1) "1 play" else "${artist.playCount} plays"
     val trackLabel = if (artist.uniqueTrackCount == 1) "1 track" else "${artist.uniqueTrackCount} tracks"
 
@@ -622,19 +620,11 @@ private fun TopArtistRow(
                 color = colors.labelTertiary,
                 modifier = Modifier.width(28.dp)
             )
-            Box(
-                modifier = Modifier
-                    .size(42.dp)
-                    .clip(CircleShape)
-                    .background(Brush.linearGradient(listOf(avatarColors.first, avatarColors.second))),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = monogram,
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = Color.White
-                )
-            }
+            ArtistAvatar(
+                artworkPath = resolvedArtworkPath,
+                artistName = artist.artist,
+                size = 42.dp
+            )
             Column(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(2.dp)

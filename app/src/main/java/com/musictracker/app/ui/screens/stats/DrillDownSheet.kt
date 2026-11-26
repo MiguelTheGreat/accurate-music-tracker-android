@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -34,7 +33,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -46,8 +44,8 @@ import com.musictracker.app.domain.model.TopTrackStat
 import com.musictracker.app.domain.model.TrackDetailStats
 import com.musictracker.app.ui.common.formatSkipRate
 import com.musictracker.app.ui.common.formatSummaryDuration
+import com.musictracker.app.ui.components.content.ArtistAvatar
 import com.musictracker.app.ui.components.content.ArtworkThumbnail
-import com.musictracker.app.ui.components.content.deterministicArtworkColors
 import com.musictracker.app.ui.components.glass.LiquidGlassButton
 import com.musictracker.app.ui.components.glass.LiquidGlassSheet
 import com.musictracker.app.ui.components.glass.LiquidGlassVariant
@@ -77,7 +75,9 @@ fun DrillDownSheet(
     artistTopTracks: List<TopTrackStat>,
     onShareTrack: (TopTrackStat) -> Unit,
     onShareArtist: (TopArtistStat, List<TopTrackStat>) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    artistArtworkPaths: Map<String, String> = emptyMap(),
+    trackArtworkPaths: Map<Long, String> = emptyMap()
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -103,6 +103,7 @@ fun DrillDownSheet(
                     is DrillDownTarget.Track -> TrackDrillDownBody(
                         fallbackTrack = target.track,
                         detail = trackDetail,
+                        resolvedArtworkPath = trackArtworkPaths[target.track.trackId],
                         timeframe = timeframe,
                         onShare = { onShareTrack(target.track) },
                         onDismiss = onDismiss
@@ -112,6 +113,9 @@ fun DrillDownSheet(
                         fallbackArtist = target.artist,
                         detail = artistDetail,
                         topTracks = artistTopTracks,
+                        resolvedArtistArtworkPath = artistArtworkPaths[artistDetail?.artist]
+                            ?: artistArtworkPaths[target.artist.artist],
+                        trackArtworkPaths = trackArtworkPaths,
                         timeframe = timeframe,
                         onShare = { onShareArtist(target.artist, artistTopTracks) },
                         onDismiss = onDismiss
@@ -126,6 +130,7 @@ fun DrillDownSheet(
 private fun TrackDrillDownBody(
     fallbackTrack: TopTrackStat,
     detail: TrackDetailStats?,
+    resolvedArtworkPath: String?,
     timeframe: StatsTimeframe,
     onShare: () -> Unit,
     onDismiss: () -> Unit
@@ -134,7 +139,7 @@ private fun TrackDrillDownBody(
     val title = detail?.title ?: fallbackTrack.title
     val artist = detail?.artist ?: fallbackTrack.artist
     val album = detail?.album ?: fallbackTrack.album
-    val artworkUri = detail?.artworkUri ?: fallbackTrack.artworkUri
+    val artworkUri = resolvedArtworkPath ?: detail?.artworkUri ?: fallbackTrack.artworkUri
     val playCount = detail?.playCount ?: fallbackTrack.playCount
     val totalMs = detail?.totalListenedMs ?: fallbackTrack.totalListenedMs
     val skipRate = detail?.skipRate ?: 0f
@@ -254,6 +259,8 @@ private fun ArtistDrillDownBody(
     fallbackArtist: TopArtistStat,
     detail: ArtistDetailStats?,
     topTracks: List<TopTrackStat>,
+    resolvedArtistArtworkPath: String?,
+    trackArtworkPaths: Map<Long, String>,
     timeframe: StatsTimeframe,
     onShare: () -> Unit,
     onDismiss: () -> Unit
@@ -265,36 +272,17 @@ private fun ArtistDrillDownBody(
     val uniqueTracks = detail?.uniqueTrackCount ?: fallbackArtist.uniqueTrackCount
     val skipRate = detail?.skipRate ?: 0f
 
-    val avatarColors = remember(artistName) { deterministicArtworkColors(artistName) }
-    val monogram = remember(artistName) {
-        val trimmed = artistName.trim()
-        if (trimmed.isEmpty()) {
-            "?"
-        } else {
-            val cp = trimmed.codePointAt(0)
-            String(Character.toChars(Character.toUpperCase(cp)))
-        }
-    }
-
     // Header
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Box(
-            modifier = Modifier
-                .size(62.dp)
-                .clip(CircleShape)
-                .background(Brush.linearGradient(listOf(avatarColors.first, avatarColors.second))),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = monogram,
-                style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
-                color = Color.White
-            )
-        }
+        ArtistAvatar(
+            artworkPath = resolvedArtistArtworkPath,
+            artistName = artistName,
+            size = 62.dp
+        )
         Column(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(2.dp)
@@ -393,7 +381,7 @@ private fun ArtistDrillDownBody(
                             color = colors.labelTertiary
                         )
                         ArtworkThumbnail(
-                            artworkUri = track.artworkUri,
+                            artworkUri = trackArtworkPaths[track.trackId] ?: track.artworkUri,
                             fallbackSeed = "${track.title}|${track.artist}",
                             contentDescription = track.title,
                             size = 36.dp,

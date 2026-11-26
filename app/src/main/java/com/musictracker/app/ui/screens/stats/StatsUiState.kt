@@ -20,5 +20,7 @@ data class StatsUiState(
     val selectedTrackDetail: TrackDetailStats? = null,
     val selectedArtistDetail: ArtistDetailStats? = null,
     val selectedArtistTopTracks: List<TopTrackStat> = emptyList(),
+    val artistArtworkPaths: Map<String, String> = emptyMap(),
+    val trackArtworkPaths: Map<Long, String> = emptyMap(),
     val isLoading: Boolean = true
 )

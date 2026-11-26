@@ -220,6 +220,7 @@ fun HomeScreenContent(
             Spacer(modifier = Modifier.height(8.dp))
             NowTrackingGlassCard(
                 nowTracking = uiState.nowTracking,
+                resolvedArtworkPath = uiState.nowTrackingArtworkPath,
                 clock = clock,
                 modifier = Modifier.testTag(TestTags.HOME_NOW_TRACKING_CARD)
             )
@@ -272,6 +273,7 @@ fun HomeScreenContent(
             ) { item ->
                 RecentListenRow(
                     item = item,
+                    resolvedArtworkPath = uiState.recentArtworkPaths[item.eventId],
                     nowEpochMs = nowEpochMs,
                     modifier = Modifier.testTag(TestTags.homeRecentItem(item.eventId))
                 )
@@ -348,6 +350,7 @@ private fun UnlockFullHistoryFooter(
 @Composable
 private fun NowTrackingGlassCard(
     nowTracking: NowTrackingState?,
+    resolvedArtworkPath: String?,
     clock: TrackerClock,
     modifier: Modifier = Modifier
 ) {
@@ -464,7 +467,7 @@ private fun NowTrackingGlassCard(
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     ArtworkThumbnail(
-                        artworkUri = nowTracking.artworkUri,
+                        artworkUri = resolvedArtworkPath ?: nowTracking.artworkUri,
                         fallbackSeed = artworkSeed,
                         contentDescription = nowTracking.normalizedTitle,
                         size = 56.dp,
@@ -714,6 +717,7 @@ private fun SummaryStatTile(
 @Composable
 private fun RecentListenRow(
     item: RecentListenItem,
+    resolvedArtworkPath: String?,
     nowEpochMs: Long,
     modifier: Modifier = Modifier
 ) {
@@ -732,7 +736,7 @@ private fun RecentListenRow(
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             ArtworkThumbnail(
-                artworkUri = item.artworkUri,
+                artworkUri = resolvedArtworkPath ?: item.artworkUri,
                 fallbackSeed = "${item.title}|${item.artist}",
                 contentDescription = item.title,
                 size = 44.dp,
