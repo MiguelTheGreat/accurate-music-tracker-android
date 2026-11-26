@@ -1,0 +1,48 @@
+name: Build and Attach Release APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to build and attach the debug APK to'
+        required: true
+        default: 'v0.1.0-preview'
+        type: string
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-attach-apk:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag || github.event.release.tag_name }}
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.event.release.tag_name }}
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
+      - name: Build debug APK
+        run: ./gradlew :app:assembleDebug --no-daemon
+
+      - name: Copy debug APK with release tag name
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk "accurate-music-tracker-${TAG}-debug.apk"
+          ls -lh "accurate-music-tracker-${TAG}-debug.apk"
+
+      - name: Upload debug APK to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$TAG" "accurate-music-tracker-${TAG}-debug.apk" --clobber
