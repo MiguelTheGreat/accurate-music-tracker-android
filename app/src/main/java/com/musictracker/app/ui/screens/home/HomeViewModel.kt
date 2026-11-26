@@ -11,6 +11,7 @@ import com.musictracker.app.domain.model.NowTrackingState
 import com.musictracker.app.domain.model.RecentListenItem
 import com.musictracker.app.domain.normalization.MusicMetadataNormalizer
 import com.musictracker.app.domain.tracking.PlaySessionEngine
+import com.musictracker.app.tracking.MusicNotificationListenerService
 import com.musictracker.app.tracking.SystemPermissionHelper
 import com.musictracker.app.ui.common.startOfTodayEpochMs
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -171,6 +172,7 @@ class HomeViewModel(
         isNotificationAccessGrantedFlow.value = hasAccess
         if (hasAccess) {
             isBannerDismissedFlow.value = false
+            MusicNotificationListenerService.requestActiveSessionSync()
         }
         todayStartEpochMsFlow.value = startOfTodayEpochMs(clock.currentTimeMillis(), zoneId)
     }

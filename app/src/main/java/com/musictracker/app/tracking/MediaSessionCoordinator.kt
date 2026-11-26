@@ -325,6 +325,10 @@ class MediaSessionCoordinator(
 
     fun onServiceStopped(): Job = flushAndStop()
 
+    fun isPackageTracked(packageName: String): Boolean = synchronized(stateLock) {
+        packageName in allowedPackages
+    }
+
     private fun reconcileSessionsLocked(
         controllers: List<TrackedMediaController>
     ): List<CompletedListenSession> {
@@ -335,16 +339,33 @@ class MediaSessionCoordinator(
 
         val emitted = mutableListOf<CompletedListenSession>()
         if (hasIdenticalTokenOrder(eligible)) {
-            val focusedPlaying = focusedTokenId != null &&
-                attachedControllers[focusedTokenId]?.cachedState?.status == PlaybackStatus.PLAYING
-            if (focusedPlaying) {
-                return emptyList()
+            val focusedEntry = focusedTokenId?.let { attachedControllers[it] }
+            if (focusedEntry != null) {
+                val liveState = focusedEntry.controller.currentPlaybackState
+                if (liveState != null && liveState.status != focusedEntry.cachedState?.status) {
+                    focusedEntry.cachedState = liveState
+                    emitted += playSessionEngine.onPlaybackEvent(
+                        PlaybackEvent.StateChanged(
+                            sourcePackage = focusedEntry.controller.packageName,
+                            state = liveState
+                        )
+                    )
+                    if (liveState.status.isTerminal()) {
+                        focusedTokenId = null
+                        selectFallbackFocusLocked(emitted)
+                    }
+                    updateSchedulersLocked()
+                    return emitted
+                }
+                if (focusedEntry.cachedState?.status == PlaybackStatus.PLAYING) {
+                    return emitted
+                }
             }
             val anyPlaying = attachedControllers.values.any {
                 it.cachedState?.status == PlaybackStatus.PLAYING
             }
             if (!anyPlaying) {
-                return emptyList()
+                return emitted
             }
         } else {
             val eligibleByToken = LinkedHashMap<Any, TrackedMediaController>(eligible.size)

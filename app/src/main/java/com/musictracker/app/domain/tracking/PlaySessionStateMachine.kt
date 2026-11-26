@@ -522,7 +522,7 @@ class PlaySessionStateMachine(
 
     companion object {
         const val DEFAULT_DEBOUNCE_MS = 1_500L
-        const val DEFAULT_IDLE_PAUSE_TIMEOUT_MS = 30L * 60L * 1_000L
+        const val DEFAULT_IDLE_PAUSE_TIMEOUT_MS = 3L * 60L * 1_000L
         const val LOOP_END_WINDOW_MS = 5_000L
         const val LOOP_END_RATIO = 0.90
         const val LOOP_START_WINDOW_MS = 3_000L

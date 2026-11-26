@@ -8,6 +8,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.Process
 import android.service.notification.NotificationListenerService
+import android.service.notification.StatusBarNotification
 import android.util.Log
 import com.musictracker.app.MusicTrackerApplication
 
@@ -107,6 +108,7 @@ class MusicNotificationListenerService : NotificationListenerService() {
                 activeGateway = gateway
                 isSessionListenerRegistered = true
                 isListenerActive = true
+                activeInstance = this
 
                 val activeSessions = gateway.getActiveSessions(componentName)
                 coordinator?.setListenerConnected(true)
@@ -114,6 +116,7 @@ class MusicNotificationListenerService : NotificationListenerService() {
                 coordinator?.onAndroidSessionsChanged(activeSessions, handler)
             } catch (e: SecurityException) {
                 isListenerActive = false
+                if (activeInstance === this) activeInstance = null
                 unregisterSessionListenerLocked()
                 coordinator?.setListenerConnected(false)
                 coordinator?.flushAndStop()
@@ -122,10 +125,19 @@ class MusicNotificationListenerService : NotificationListenerService() {
         }
     }
 
+    override fun onNotificationRemoved(sbn: StatusBarNotification?) {
+        super.onNotificationRemoved(sbn)
+        val pkg = sbn?.packageName ?: return
+        val coordinator = resolveCoordinator() ?: return
+        if (!coordinator.isPackageTracked(pkg)) return
+        syncActiveSessionsInternal()
+    }
+
     override fun onListenerDisconnected() {
         super.onListenerDisconnected()
         synchronized(handlerLock) {
             isListenerActive = false
+            if (activeInstance === this) activeInstance = null
             unregisterSessionListenerLocked()
             resolveCoordinator()?.let { coordinator ->
                 coordinator.setListenerConnected(false)
@@ -143,6 +155,7 @@ class MusicNotificationListenerService : NotificationListenerService() {
         val threadToQuit = synchronized(handlerLock) {
             isDestroyed = true
             isListenerActive = false
+            if (activeInstance === this) activeInstance = null
             unregisterSessionListenerLocked()
             resolveCoordinator()?.let { coordinator ->
                 coordinator.setListenerConnected(false)
@@ -157,6 +170,22 @@ class MusicNotificationListenerService : NotificationListenerService() {
             runCatching { threadToQuit.quitSafely() }
         }
         super.onDestroy()
+    }
+
+    private fun syncActiveSessionsInternal() {
+        synchronized(handlerLock) {
+            if (isDestroyed || !isListenerActive) return
+            val gateway = activeGateway ?: return
+            val handler = callbackHandlerOverride ?: callbackHandler ?: return
+            val coordinator = resolveCoordinator() ?: return
+            handler.post {
+                val sessions = synchronized(handlerLock) {
+                    if (isDestroyed || !isListenerActive) return@post
+                    runCatching { gateway.getActiveSessions(componentName) }.getOrNull()
+                } ?: return@post
+                coordinator.onAndroidSessionsChanged(sessions, handler)
+            }
+        }
     }
 
     private fun ensureCallbackHandler(): Handler? {
@@ -201,5 +230,12 @@ class MusicNotificationListenerService : NotificationListenerService() {
     companion object {
         private const val TAG = "MusicNotifListenerSvc"
         private const val CALLBACK_THREAD_NAME = "CollectoMediaCallbacks"
+
+        @Volatile
+        private var activeInstance: MusicNotificationListenerService? = null
+
+        fun requestActiveSessionSync() {
+            activeInstance?.syncActiveSessionsInternal()
+        }
     }
 }
