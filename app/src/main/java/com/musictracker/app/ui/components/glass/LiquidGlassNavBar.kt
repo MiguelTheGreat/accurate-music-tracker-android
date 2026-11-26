@@ -51,6 +51,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
@@ -351,8 +352,8 @@ fun LiquidGlassNavBar(
                     .shadow(
                         elevation = if (isLensSwollen) 10.dp else 3.dp,
                         shape = LiquidGlassShapes.Capsule,
-                        ambientColor = colors.accentBlue.copy(alpha = 0.35f),
-                        spotColor = colors.accentBlue.copy(alpha = 0.45f),
+                        ambientColor = colors.accentBlue.copy(alpha = if (colors.isDark) 0.35f else 0.20f),
+                        spotColor = colors.accentBlue.copy(alpha = if (colors.isDark) 0.45f else 0.26f),
                         clip = false
                     )
                     .clip(LiquidGlassShapes.Capsule)
@@ -368,16 +369,34 @@ fun LiquidGlassNavBar(
                                     colors.accentBlue.copy(alpha = if (colors.isDark) 0.28f else 0.18f)
                                 )
                             )
-                        } else {
-                            val topAlpha = (if (colors.isDark) 0.26f else 0.58f) + (0.18f * glowAlpha)
-                            val bottomAlpha = (if (colors.isDark) 0.12f else 0.28f) + (0.10f * glowAlpha)
+                        } else if (!colors.isDark) {
+                            // Light Mode: cool-white top caustic -> soft accentBlue glass tint -> bottom reflection
                             Brush.verticalGradient(
                                 colorStops = arrayOf(
-                                    0.0f to Color.White.copy(alpha = topAlpha),
-                                    0.45f to colors.accentBlue.copy(
-                                        alpha = (if (colors.isDark) 0.22f else 0.15f) + (0.10f * glowAlpha)
+                                    0.0f to Color(0xFFF8FBFF).copy(
+                                        alpha = (0.85f + 0.12f * glowAlpha).coerceAtMost(0.98f)
                                     ),
-                                    1.0f to colors.accentBlue.copy(alpha = bottomAlpha)
+                                    0.46f to colors.accentBlue.copy(
+                                        alpha = (0.18f + 0.10f * glowAlpha).coerceAtMost(1f)
+                                    ),
+                                    1.0f to colors.accentBlue.copy(
+                                        alpha = (0.10f + 0.08f * glowAlpha).coerceAtMost(1f)
+                                    )
+                                )
+                            )
+                        } else {
+                            // Dark Mode: luminous top catchlight -> vibrant glass tint -> bottom bounce
+                            Brush.verticalGradient(
+                                colorStops = arrayOf(
+                                    0.0f to Color.White.copy(
+                                        alpha = (0.28f + 0.20f * glowAlpha).coerceAtMost(1f)
+                                    ),
+                                    0.45f to colors.accentBlue.copy(
+                                        alpha = (0.24f + 0.12f * glowAlpha).coerceAtMost(1f)
+                                    ),
+                                    1.0f to colors.accentBlue.copy(
+                                        alpha = (0.14f + 0.10f * glowAlpha).coerceAtMost(1f)
+                                    )
                                 )
                             )
                         }
@@ -387,16 +406,102 @@ fun LiquidGlassNavBar(
                             cornerRadius = cornerRadius
                         )
 
-                        val strokePx = (if (isLensSwollen) 1.35.dp else 0.85.dp).toPx()
+                        // Inner caustic crescent / arc for convex refractive lens depth
+                        if (!accessibility.reduceTransparency && !accessibility.highContrast) {
+                            val innerInsetPx = 1.5.dp.toPx()
+                            val innerStrokePx = 1.2.dp.toPx()
+                            val innerWidth = size.width - (innerInsetPx * 2f)
+                            val innerHeight = size.height - (innerInsetPx * 2f)
+                            if (innerWidth > 2f && innerHeight > 2f) {
+                                val innerRadius = (radius - innerInsetPx).coerceAtLeast(0f)
+                                val innerCausticBrush = if (!colors.isDark) {
+                                    Brush.verticalGradient(
+                                        colorStops = arrayOf(
+                                            0.0f to Color.White.copy(alpha = 0.92f),
+                                            0.38f to Color.White.copy(alpha = 0.18f),
+                                            0.72f to Color.Transparent,
+                                            1.0f to colors.accentBlue.copy(
+                                                alpha = (0.20f + 0.14f * glowAlpha).coerceAtMost(1f)
+                                            )
+                                        )
+                                    )
+                                } else {
+                                    Brush.verticalGradient(
+                                        colorStops = arrayOf(
+                                            0.0f to Color.White.copy(
+                                                alpha = (0.44f + 0.30f * glowAlpha).coerceAtMost(1f)
+                                            ),
+                                            0.34f to Color(0xFF9CD4FF).copy(
+                                                alpha = (0.12f + 0.12f * glowAlpha).coerceAtMost(1f)
+                                            ),
+                                            0.72f to Color.Transparent,
+                                            1.0f to colors.accentBlue.copy(
+                                                alpha = (0.22f + 0.24f * glowAlpha).coerceAtMost(1f)
+                                            )
+                                        )
+                                    )
+                                }
+                                drawRoundRect(
+                                    brush = innerCausticBrush,
+                                    topLeft = Offset(innerInsetPx, innerInsetPx),
+                                    size = Size(innerWidth, innerHeight),
+                                    cornerRadius = CornerRadius(innerRadius, innerRadius),
+                                    style = Stroke(width = innerStrokePx)
+                                )
+                            }
+                        }
+
+                        val strokePx = if (accessibility.highContrast) {
+                            LiquidGlassMetrics.RimWidthHighContrast.toPx()
+                        } else {
+                            (if (isLensSwollen) 1.35.dp else 0.95.dp).toPx()
+                        }
                         val halfStroke = strokePx / 2f
                         val insetRadius = (radius - halfStroke).coerceAtLeast(0f)
-                        val lensBorderBrush = Brush.verticalGradient(
-                            colorStops = arrayOf(
-                                0.0f to colors.specularTopHighlight.copy(alpha = 0.55f + (0.40f * glowAlpha)),
-                                0.5f to colors.rimBorder.copy(alpha = 0.35f + (0.30f * glowAlpha)),
-                                1.0f to colors.specularBottomHighlight.copy(alpha = 0.40f + (0.35f * glowAlpha))
-                            )
-                        )
+                        val lensBorderBrush = when {
+                            accessibility.highContrast -> {
+                                Brush.verticalGradient(
+                                    listOf(colors.rimBorderHighContrast, colors.rimBorderHighContrast)
+                                )
+                            }
+
+                            !colors.isDark -> {
+                                Brush.verticalGradient(
+                                    colorStops = arrayOf(
+                                        0.0f to Color.White.copy(alpha = 0.95f),
+                                        0.45f to Color(0xFF1E3A5F).copy(
+                                            alpha = (0.24f + 0.14f * glowAlpha).coerceAtMost(1f)
+                                        ),
+                                        1.0f to colors.accentBlue.copy(
+                                            alpha = (0.28f + 0.16f * glowAlpha).coerceAtMost(1f)
+                                        )
+                                    )
+                                )
+                            }
+
+                            else -> {
+                                // Subtle chromatic top/bottom rim glint when swollen/dragging in Dark Mode
+                                val topRim = lerp(
+                                    colors.specularTopHighlight,
+                                    Color(0xFFA8E6FF),
+                                    0.35f * glowAlpha
+                                ).copy(alpha = (0.62f + 0.34f * glowAlpha).coerceAtMost(1f))
+                                val bottomRim = lerp(
+                                    colors.specularBottomHighlight,
+                                    Color(0xFFC4B5FD),
+                                    0.40f * glowAlpha
+                                ).copy(alpha = (0.44f + 0.36f * glowAlpha).coerceAtMost(1f))
+                                Brush.verticalGradient(
+                                    colorStops = arrayOf(
+                                        0.0f to topRim,
+                                        0.5f to colors.rimBorder.copy(
+                                            alpha = (0.38f + 0.28f * glowAlpha).coerceAtMost(1f)
+                                        ),
+                                        1.0f to bottomRim
+                                    )
+                                )
+                            }
+                        }
 
                         drawRoundRect(
                             brush = lensBorderBrush,

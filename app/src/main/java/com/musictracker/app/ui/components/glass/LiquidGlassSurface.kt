@@ -1,11 +1,6 @@
 package com.musictracker.app.ui.components.glass
 
-import android.graphics.ColorMatrix
-import android.graphics.ColorMatrixColorFilter
-import android.graphics.RenderEffect
-import android.graphics.Shader
 import android.os.Build
-import androidx.annotation.RequiresApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
@@ -15,24 +10,28 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.musictracker.app.ui.theme.LiquidGlassMetrics
 import com.musictracker.app.ui.theme.LiquidGlassShapes
@@ -58,12 +57,15 @@ internal val LocalInsideLiquidGlass = compositionLocalOf { false }
 /**
  * Core Liquid Glass chrome primitive.
  *
- * - API 31+: Samples the sibling [LiquidGlassBackdropState] into a background-only layer blurred
- *   with `RenderEffect` (guarded by `Build.VERSION.SDK_INT >= Build.VERSION_CODES.S` and
- *   `blurRadiusPx > 0.5f` to avoid Android's `BlurEffect(0f, 0f)` runtime crash).
- * - API 26-30: Uses a graceful frosted translucent fallback with specular rim highlights.
- * - Accessibility: Honors Reduced Transparency (no blur, ~0.94 fill), High Contrast (1.5dp 0.85
- *   alpha border), and Reduced Motion (disables touch bloom).
+ * - API 33+: Samples the sibling [LiquidGlassBackdropState] into a background-only layer blurred
+ *   and optically refracted via an AGSL `RuntimeShader` (`RenderEffect.createRuntimeShaderEffect`
+ *   chained over blur + saturation) with safe fallback to API 31–32 blur+saturation.
+ * - API 31–32: Samples the sibling [LiquidGlassBackdropState] blurred with `RenderEffect`
+ *   (guarded by `blurRadiusPx > 0.5f` to avoid Android's `BlurEffect(0f, 0f)` runtime crash).
+ * - API 26–30: Uses a graceful frosted translucent fallback with multi-layer caustic & Fresnel
+ *   rim highlights.
+ * - Accessibility: Honors Reduced Transparency (no blur/refraction/caustics, ~0.94 fill),
+ *   High Contrast (1.5dp 0.85 alpha border), and Reduced Motion (disables touch bloom).
  */
 @Composable
 fun LiquidGlassSurface(
@@ -83,15 +85,22 @@ fun LiquidGlassSurface(
     val density = LocalDensity.current
 
     val surfacePositionInRoot = remember { mutableStateOf(Offset.Zero) }
+    var surfaceSizePx by remember { mutableStateOf(IntSize.Zero) }
 
+    val useApi33RefractionTuning = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+        blurRadiusOverride == null
     val baseBlurDp = blurRadiusOverride ?: when (variant) {
-        LiquidGlassVariant.Regular, LiquidGlassVariant.Prominent -> LiquidGlassMetrics.BlurRadiusRegular
-        LiquidGlassVariant.Clear -> LiquidGlassMetrics.BlurRadiusClear
+        LiquidGlassVariant.Regular, LiquidGlassVariant.Prominent ->
+            if (useApi33RefractionTuning) RefractionBlurRadiusRegular else LiquidGlassMetrics.BlurRadiusRegular
+        LiquidGlassVariant.Clear ->
+            if (useApi33RefractionTuning) RefractionBlurRadiusClear else LiquidGlassMetrics.BlurRadiusClear
     }
     val blurRadiusPx = with(density) { baseBlurDp.toPx() }
     val saturation = when (variant) {
-        LiquidGlassVariant.Clear -> LiquidGlassMetrics.SaturationClear
-        LiquidGlassVariant.Regular, LiquidGlassVariant.Prominent -> LiquidGlassMetrics.SaturationRegular
+        LiquidGlassVariant.Clear ->
+            if (useApi33RefractionTuning) RefractionSaturationClear else LiquidGlassMetrics.SaturationClear
+        LiquidGlassVariant.Regular, LiquidGlassVariant.Prominent ->
+            if (useApi33RefractionTuning) RefractionSaturationRegular else LiquidGlassMetrics.SaturationRegular
     }
 
     val canUseBackdropBlur = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
@@ -100,14 +109,58 @@ fun LiquidGlassSurface(
         backdrop != null &&
         blurRadiusPx > LiquidGlassMetrics.MinSafeBlurRadiusPx
 
-    val composeRenderEffect = remember(canUseBackdropBlur, blurRadiusPx, saturation) {
-        if (canUseBackdropBlur && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            createLiquidGlassRenderEffect(
-                radiusPx = blurRadiusPx,
-                saturation = saturation
-            )?.asComposeRenderEffect()
+    val cornerRadiusPx = remember(shape, surfaceSizePx, density) {
+        if (surfaceSizePx.width > 0 && surfaceSizePx.height > 0) {
+            resolveCornerRadiusPx(
+                shape = shape,
+                size = Size(surfaceSizePx.width.toFloat(), surfaceSizePx.height.toFloat()),
+                density = density
+            )
         } else {
-            null
+            0f
+        }
+    }
+
+    val refractionStrengthPx = remember(surfaceSizePx, variant, density) {
+        with(density) {
+            val strengthDp = when (variant) {
+                LiquidGlassVariant.Clear -> 18.dp
+                LiquidGlassVariant.Regular, LiquidGlassVariant.Prominent -> 14.dp
+            }
+            val maxAllowed = minOf(surfaceSizePx.width, surfaceSizePx.height) * 0.24f
+            strengthDp.toPx().coerceAtMost(maxAllowed.coerceAtLeast(0f))
+        }
+    }
+    val chromaticAberrationPx = remember(variant, density) {
+        with(density) {
+            when (variant) {
+                LiquidGlassVariant.Clear -> 2.8.dp.toPx()
+                LiquidGlassVariant.Regular, LiquidGlassVariant.Prominent -> 2.2.dp.toPx()
+            }
+        }
+    }
+
+    val glassEffectResult = remember(
+        canUseBackdropBlur,
+        blurRadiusPx,
+        saturation,
+        surfaceSizePx,
+        cornerRadiusPx,
+        colors.isDark,
+        variant
+    ) {
+        if (canUseBackdropBlur && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            createLiquidGlassEffectResult(
+                radiusPx = blurRadiusPx,
+                saturation = saturation,
+                surfaceSizePx = surfaceSizePx,
+                cornerRadiusPx = cornerRadiusPx,
+                refractionStrengthPx = refractionStrengthPx,
+                chromaticAberrationPx = chromaticAberrationPx,
+                isDark = colors.isDark
+            )
+        } else {
+            LiquidGlassEffectResult(renderEffect = null, hasActiveRefraction = false)
         }
     }
 
@@ -116,7 +169,7 @@ fun LiquidGlassSurface(
     } else {
         LiquidGlassMetrics.RimWidthStandard
     }
-    val borderBrush = remember(accessibility.highContrast, colors) {
+    val fallbackBorderBrush = remember(accessibility.highContrast, colors) {
         if (accessibility.highContrast) {
             Brush.verticalGradient(listOf(colors.rimBorderHighContrast, colors.rimBorderHighContrast))
         } else {
@@ -135,6 +188,7 @@ fun LiquidGlassSurface(
         isNestedGlass,
         variant,
         canUseBackdropBlur,
+        glassEffectResult.hasActiveRefraction,
         colors
     ) {
         when {
@@ -162,10 +216,15 @@ fun LiquidGlassSurface(
             }
 
             canUseBackdropBlur -> {
+                val baseFill = if (glassEffectResult.hasActiveRefraction) {
+                    colors.regularFill.copy(alpha = if (colors.isDark) 0.34f else 0.42f)
+                } else {
+                    colors.regularFill
+                }
                 Brush.verticalGradient(
                     colors = listOf(
-                        colors.regularFill,
-                        colors.regularFill.copy(alpha = (colors.regularFill.alpha * 0.92f).coerceAtLeast(0f))
+                        baseFill,
+                        baseFill.copy(alpha = (baseFill.alpha * 0.90f).coerceAtLeast(0f))
                     )
                 )
             }
@@ -183,29 +242,38 @@ fun LiquidGlassSurface(
     }
 
     val elevationDp = if (isNestedGlass) 0.dp else 10.dp
+    val shadowAmbientAlpha = if (colors.isDark) 0.22f else 0.10f
+    val shadowSpotAlpha = if (colors.isDark) 0.28f else 0.14f
+    val showOpticalOverlay = !accessibility.reduceTransparency && !isNestedGlass
 
     Box(
         modifier = modifier
             .shadow(
                 elevation = elevationDp,
                 shape = shape,
-                ambientColor = Color.Black.copy(alpha = 0.24f),
-                spotColor = Color.Black.copy(alpha = 0.28f),
+                ambientColor = Color.Black.copy(alpha = shadowAmbientAlpha),
+                spotColor = Color.Black.copy(alpha = shadowSpotAlpha),
                 clip = false
             )
             .clip(shape)
             .then(
                 if (canUseBackdropBlur) {
-                    Modifier.onGloballyPositioned { coordinates ->
-                        surfacePositionInRoot.value = coordinates.positionInRoot()
-                    }
+                    Modifier
+                        .onSizeChanged { newSize ->
+                            if (surfaceSizePx != newSize) {
+                                surfaceSizePx = newSize
+                            }
+                        }
+                        .onGloballyPositioned { coordinates ->
+                            surfacePositionInRoot.value = coordinates.positionInRoot()
+                        }
                 } else {
                     Modifier
                 }
             )
             .touchPointIllumination(enabled = interactive && !isNestedGlass)
     ) {
-        // Layer 1: Background-only blurred backdrop (sibling behind foreground content)
+        // Layer 1: Background-only blurred & refracted backdrop (sibling behind foreground content)
         if (canUseBackdropBlur) {
             Box(
                 modifier = Modifier
@@ -213,7 +281,7 @@ fun LiquidGlassSurface(
                     .graphicsLayer {
                         clip = true
                         this.shape = shape
-                        renderEffect = composeRenderEffect
+                        renderEffect = glassEffectResult.renderEffect
                     }
                     .drawBehind {
                         if (backdrop.hasRecordedContent) {
@@ -235,12 +303,28 @@ fun LiquidGlassSurface(
             )
         }
 
-        // Optical glass tint + specular rim border
+        // Optical glass tint + multi-layer caustic & Fresnel rim overlay
         Box(
             modifier = Modifier
                 .matchParentSize()
                 .background(fillBrush)
-                .border(width = borderWidth, brush = borderBrush, shape = shape)
+                .then(
+                    if (showOpticalOverlay) {
+                        Modifier.drawBehind {
+                            drawLiquidGlassOptics(
+                                shape = shape,
+                                colors = colors,
+                                highContrast = accessibility.highContrast
+                            )
+                        }
+                    } else {
+                        Modifier.border(
+                            width = borderWidth,
+                            brush = fallbackBorderBrush,
+                            shape = shape
+                        )
+                    }
+                )
         )
 
         // Layer 2: Razor-sharp foreground content
@@ -248,22 +332,4 @@ fun LiquidGlassSurface(
             Box(modifier = Modifier.padding(contentPadding), content = content)
         }
     }
-}
-
-@RequiresApi(Build.VERSION_CODES.S)
-private fun createLiquidGlassRenderEffect(
-    radiusPx: Float,
-    saturation: Float
-): RenderEffect? {
-    if (radiusPx <= LiquidGlassMetrics.MinSafeBlurRadiusPx) return null
-    val blurEffect = RenderEffect.createBlurEffect(
-        radiusPx,
-        radiusPx,
-        Shader.TileMode.CLAMP
-    )
-    val saturationMatrix = ColorMatrix().apply { setSaturation(saturation) }
-    val colorFilterEffect = RenderEffect.createColorFilterEffect(
-        ColorMatrixColorFilter(saturationMatrix)
-    )
-    return RenderEffect.createChainEffect(colorFilterEffect, blurEffect)
 }

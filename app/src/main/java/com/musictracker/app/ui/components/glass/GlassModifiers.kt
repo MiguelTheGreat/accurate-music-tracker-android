@@ -114,12 +114,19 @@ fun Modifier.liquidBounce(
         .drawWithContent {
             drawContent()
             if (pressSheen > 0.01f && !accessibility.reduceTransparency) {
+                val midSheenColor = if (colors.isDark) {
+                    Color.White.copy(alpha = 0.10f * pressSheen)
+                } else {
+                    colors.accentBlue.copy(alpha = 0.08f * pressSheen)
+                }
                 drawRect(
                     brush = Brush.verticalGradient(
                         colorStops = arrayOf(
-                            0.0f to colors.specularTopHighlight.copy(alpha = 0.24f * pressSheen),
-                            0.45f to Color.White.copy(alpha = 0.08f * pressSheen),
-                            1.0f to colors.specularBottomHighlight.copy(alpha = 0.14f * pressSheen)
+                            0.0f to colors.specularTopHighlight.copy(
+                                alpha = (if (colors.isDark) 0.26f else 0.34f) * pressSheen
+                            ),
+                            0.45f to midSheenColor,
+                            1.0f to colors.specularBottomHighlight.copy(alpha = 0.16f * pressSheen)
                         )
                     )
                 )
