@@ -165,11 +165,14 @@ fun <T> LiquidGlassSegmentedControl(
                 modifier = Modifier
                     .fillMaxSize()
                     .liquidLensContent(
-                        enabled = !accessibility.reduceTransparency,
+                        enabled = !accessibility.reduceTransparency && !accessibility.reduceMotion,
                         optics = LiquidGlassOpticsTokens.ThumbLens,
                         isDark = colors.isDark,
                         lightDirection = lensLightDirection
                     ) {
+                        val travelDelta = kotlin.math.abs(animatedIndex - selectedIndex)
+                        if (!isLifted && travelDelta < 0.015f) return@liquidLensContent null
+
                         val segW = segmentWidth.toPx()
                         LiquidLensGeometry(
                             left = animatedIndex * segW,
@@ -178,7 +181,7 @@ fun <T> LiquidGlassSegmentedControl(
                             height = size.height,
                             scaleX = thumbScaleX,
                             scaleY = thumbScaleY,
-                            magnificationBoost = if (isLifted) 1.05f else 1f
+                            magnificationBoost = if (isLifted) 1.03f else 1f
                         )
                     }
                     .selectableGroup(),

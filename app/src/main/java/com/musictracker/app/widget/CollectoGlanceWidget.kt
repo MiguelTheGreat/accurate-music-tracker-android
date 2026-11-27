@@ -197,6 +197,27 @@ private fun CollectoWidgetContent(
 }
 
 @Composable
+private fun WidgetStatusPill(text: String) {
+    Box(
+        modifier = GlanceModifier
+            .background(ImageProvider(R.drawable.widget_liquid_glass_pill))
+            .cornerRadius(100.dp)
+            .padding(horizontal = 8.dp, vertical = 2.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            style = TextStyle(
+                color = WidgetAccentColor,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold
+            ),
+            maxLines = 1
+        )
+    }
+}
+
+@Composable
 private fun NowTrackingContent(
     state: CollectoWidgetState.NowTracking,
     artworkBitmap: Bitmap?
@@ -211,22 +232,14 @@ private fun NowTrackingContent(
                 contentDescription = state.title,
                 contentScale = ContentScale.Crop,
                 modifier = GlanceModifier
-                    .size(48.dp)
-                    .cornerRadius(12.dp)
+                    .size(52.dp)
+                    .cornerRadius(14.dp)
             )
             Spacer(modifier = GlanceModifier.width(12.dp))
         }
         Column(modifier = GlanceModifier.defaultWeight()) {
-            Text(
-                text = "NOW TRACKING • ${state.sourceApp.uppercase(Locale.US)}",
-                style = TextStyle(
-                    color = WidgetAccentColor,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold
-                ),
-                maxLines = 1
-            )
-            Spacer(modifier = GlanceModifier.height(2.dp))
+            WidgetStatusPill(text = "NOW TRACKING • ${state.sourceApp.uppercase(Locale.US)}")
+            Spacer(modifier = GlanceModifier.height(4.dp))
             Text(
                 text = state.title,
                 style = TextStyle(
@@ -264,22 +277,14 @@ private fun WeeklyTopArtistContent(
                 contentDescription = state.artistName,
                 contentScale = ContentScale.Crop,
                 modifier = GlanceModifier
-                    .size(48.dp)
-                    .cornerRadius(24.dp)
+                    .size(52.dp)
+                    .cornerRadius(26.dp)
             )
             Spacer(modifier = GlanceModifier.width(12.dp))
         }
         Column(modifier = GlanceModifier.defaultWeight()) {
-            Text(
-                text = "COLLECTO • THIS WEEK",
-                style = TextStyle(
-                    color = WidgetAccentColor,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold
-                ),
-                maxLines = 1
-            )
-            Spacer(modifier = GlanceModifier.height(2.dp))
+            WidgetStatusPill(text = "COLLECTO • THIS WEEK")
+            Spacer(modifier = GlanceModifier.height(4.dp))
             Text(
                 text = "#1 ${state.artistName}",
                 style = TextStyle(
@@ -306,16 +311,8 @@ private fun WeeklyTopArtistContent(
 @Composable
 private fun EmptyWidgetContent() {
     Column(modifier = GlanceModifier.fillMaxWidth()) {
-        Text(
-            text = "COLLECTO",
-            style = TextStyle(
-                color = WidgetAccentColor,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold
-            ),
-            maxLines = 1
-        )
-        Spacer(modifier = GlanceModifier.height(2.dp))
+        WidgetStatusPill(text = "COLLECTO")
+        Spacer(modifier = GlanceModifier.height(4.dp))
         Text(
             text = "Ready to track",
             style = TextStyle(

@@ -174,48 +174,54 @@ data class LiquidGlassOptics(
 
 object LiquidGlassOpticsTokens {
     val Regular = LiquidGlassOptics(
-        blurRadius = 3.dp,
-        legacyBlurRadius = 9.dp,
-        refraction = 12.dp,
-        edgeThickness = 20.dp,
-        dispersion = 0.6.dp,
-        specularIntensity = 0.55f,
-        saturation = 1.45f,
-        legacySaturation = 1.6f,
-        tintAlphaScale = 0.45f,
-        luminanceAdaptation = 0.14f
+        blurRadius = 6.dp,
+        legacyBlurRadius = 10.dp,
+        refraction = 9.dp,
+        edgeThickness = 14.dp,
+        dispersion = 0.45.dp,
+        specularIntensity = 0.24f,
+        saturation = 1.35f,
+        legacySaturation = 1.5f,
+        tintAlphaScale = 0.58f,
+        luminanceAdaptation = 0.08f
     )
 
     val Clear = LiquidGlassOptics(
-        blurRadius = 1.5.dp,
+        blurRadius = 2.5.dp,
         legacyBlurRadius = 5.dp,
-        refraction = 16.dp,
-        edgeThickness = 24.dp,
-        dispersion = 0.8.dp,
-        specularIntensity = 0.7f,
-        saturation = 1.3f,
-        legacySaturation = 1.45f,
-        tintAlphaScale = 0.3f,
-        luminanceAdaptation = 0.06f
+        refraction = 12.dp,
+        edgeThickness = 16.dp,
+        dispersion = 0.55.dp,
+        specularIntensity = 0.30f,
+        saturation = 1.28f,
+        legacySaturation = 1.4f,
+        tintAlphaScale = 0.35f,
+        luminanceAdaptation = 0.03f
     )
 
-    /** Sliding nav-bar lens pill: no blur, strong magnification of the icons beneath. */
+    /** Sliding nav-bar lens pill: gentle magnification while dragging/swollen, zero blur. */
     val NavLens = LiquidGlassOptics(
         blurRadius = 0.dp,
         legacyBlurRadius = 0.dp,
-        refraction = 7.dp,
-        edgeThickness = 14.dp,
-        dispersion = 0.7.dp,
-        specularIntensity = 0.8f,
-        saturation = 1.15f,
+        refraction = 3.5.dp,
+        edgeThickness = 8.dp,
+        dispersion = 0.35.dp,
+        specularIntensity = 0.28f,
+        saturation = 1.10f,
         legacySaturation = 1f,
-        tintAlphaScale = 0.6f,
+        tintAlphaScale = 0.45f,
         luminanceAdaptation = 0f,
-        magnification = 1.18f
+        magnification = 1.07f
     )
 
-    /** Segmented-control thumb lens: gentler magnification. */
-    val ThumbLens = NavLens.copy(refraction = 5.dp, edgeThickness = 10.dp, magnification = 1.10f)
+    /** Segmented-control thumb lens: subtle magnification while lifted/sliding. */
+    val ThumbLens = NavLens.copy(
+        refraction = 2.5.dp,
+        edgeThickness = 6.dp,
+        dispersion = 0.25.dp,
+        specularIntensity = 0.22f,
+        magnification = 1.04f
+    )
 
     fun forVariant(isClear: Boolean): LiquidGlassOptics = if (isClear) Clear else Regular
 }

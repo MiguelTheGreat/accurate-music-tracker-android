@@ -87,7 +87,9 @@ internal const val LIQUID_GLASS_LENS_AGSL = """
         float2 n = float2(p.x < 0.0 ? -g.x : g.x, p.y < 0.0 ? -g.y : g.y);
 
         float rim = 1.0 - clamp(-d / max(edge, 1.0), 0.0, 1.0);
-        float bend = 1.0 - sqrt(max(1.0 - rim * rim, 0.0));
+        // Keep interior calm and undistorted; concentrate optical bending tightly in the curved rim.
+        float rim2 = rim * rim;
+        float bend = rim2 * (1.0 - sqrt(max(1.0 - rim2, 0.0)));
 
         float2 lo = float2(0.5);
         float2 hi = max(resolution - float2(0.5), lo);
@@ -100,14 +102,16 @@ internal const val LIQUID_GLASS_LENS_AGSL = """
         float3 col = float3(cR, cG.g, cB);
 
         float luma = dot(col, float3(0.2126, 0.7152, 0.0722));
-        float target = (isDark > 0.5 ? 0.30 : 0.74) * cG.a;
+        float target = (isDark > 0.5 ? 0.14 : 0.86) * cG.a;
         col += float3((target - luma) * lumAdapt);
 
-        float rimLight = rim * rim * rim;
+        // Crisp hairline specular hugged to the outer glass bevel (no wide foggy halo).
+        float rimHairline = smoothstep(0.76, 1.0, rim);
+        float rimLight = rimHairline * rimHairline;
         float s1 = max(dot(n, lightDir), 0.0);
         float s2 = max(dot(n, -lightDir), 0.0);
-        float spec = (s1 * s1 + 0.45 * s2 * s2 * s2) * rimLight * specular;
-        col += float3(spec) * max(cG.a, 0.35);
+        float spec = (s1 * s1 + 0.35 * s2 * s2 * s2) * rimLight * specular;
+        col += float3(spec) * max(cG.a, 0.25);
 
         float a = max(cG.a, clamp(spec, 0.0, 1.0));
         return half4(half3(clamp(col, float3(0.0), float3(a))), half(a));
@@ -196,11 +200,10 @@ internal fun createLegacyBlurEffect(radiusPx: Float, saturation: Float): Compose
 
 
 /**
- * Single-pass multi-layer caustic & Fresnel rim overlay for API 26–35 Liquid Glass surfaces
+ * Subtle single-pass Fresnel rim overlay for API 26–35 Liquid Glass surfaces
  * (invoked from `drawBehind` only when `!reduceTransparency && !isNestedGlass`):
- * 1. Subtle diagonal refractive gloss sheen (top-left catchlight to bottom-right).
- * 2. Inner caustic top-arc & bottom-bounce bevel stroke (inset 1.5dp) for convex glass depth.
- * 3. Crisp outer Fresnel rim border (1dp standard, or 1.5dp solid [LiquidGlassColorPalette.rimBorderHighContrast]).
+ * 1. Whisper-soft top ambient sheen (no milky diagonal fog wash).
+ * 2. Single razor-crisp outer Fresnel hairline rim (0.8dp standard, or 1.5dp high-contrast).
  */
 internal fun DrawScope.drawLiquidGlassOptics(
     shape: Shape,
@@ -212,77 +215,34 @@ internal fun DrawScope.drawLiquidGlassOptics(
     val radius = resolveCornerRadiusPx(shape = shape, size = size, density = this)
     val cornerRadius = CornerRadius(radius, radius)
 
-    // 1. Diagonal refractive gloss sheen (top-left catchlight -> bottom-right bounce)
-    val glossBrush = if (colors.isDark) {
-        Brush.linearGradient(
+    // 1. Whisper-soft vertical ambient glass sheen (keeps interior calm & legible)
+    val sheenBrush = if (colors.isDark) {
+        Brush.verticalGradient(
             colorStops = arrayOf(
-                0.0f to Color.White.copy(alpha = 0.14f),
-                0.38f to Color.White.copy(alpha = 0.03f),
-                0.72f to Color.Transparent,
-                1.0f to colors.accentBlue.copy(alpha = 0.06f)
-            ),
-            start = Offset.Zero,
-            end = Offset(size.width, size.height)
+                0.0f to Color.White.copy(alpha = 0.055f),
+                0.28f to Color.White.copy(alpha = 0.01f),
+                1.0f to Color.Transparent
+            )
         )
     } else {
-        Brush.linearGradient(
+        Brush.verticalGradient(
             colorStops = arrayOf(
-                0.0f to Color.White.copy(alpha = 0.44f),
-                0.36f to Color.White.copy(alpha = 0.12f),
-                0.74f to Color.Transparent,
-                1.0f to Color(0xFF0F172A).copy(alpha = 0.04f)
-            ),
-            start = Offset.Zero,
-            end = Offset(size.width, size.height)
+                0.0f to Color.White.copy(alpha = 0.24f),
+                0.32f to Color.White.copy(alpha = 0.05f),
+                1.0f to Color.Transparent
+            )
         )
     }
     drawRoundRect(
-        brush = glossBrush,
+        brush = sheenBrush,
         cornerRadius = cornerRadius
     )
 
-    // 2. Inner caustic top-arc & bottom-bounce bevel stroke (inset 1.5dp)
-    if (!highContrast) {
-        val innerInsetPx = 1.5.dp.toPx()
-        val innerStrokePx = 1.25.dp.toPx()
-        val innerWidth = size.width - (innerInsetPx * 2f)
-        val innerHeight = size.height - (innerInsetPx * 2f)
-        if (innerWidth > 2f && innerHeight > 2f) {
-            val innerRadius = (radius - innerInsetPx).coerceAtLeast(0f)
-            val innerCausticBrush = if (colors.isDark) {
-                Brush.verticalGradient(
-                    colorStops = arrayOf(
-                        0.0f to Color.White.copy(alpha = 0.34f),
-                        0.26f to Color.White.copy(alpha = 0.04f),
-                        0.74f to Color.Transparent,
-                        1.0f to colors.accentBlue.copy(alpha = 0.22f)
-                    )
-                )
-            } else {
-                Brush.verticalGradient(
-                    colorStops = arrayOf(
-                        0.0f to Color.White.copy(alpha = 0.85f),
-                        0.28f to Color.White.copy(alpha = 0.16f),
-                        0.74f to Color.Transparent,
-                        1.0f to colors.accentBlue.copy(alpha = 0.18f)
-                    )
-                )
-            }
-            drawRoundRect(
-                brush = innerCausticBrush,
-                topLeft = Offset(innerInsetPx, innerInsetPx),
-                size = Size(innerWidth, innerHeight),
-                cornerRadius = CornerRadius(innerRadius, innerRadius),
-                style = Stroke(width = innerStrokePx)
-            )
-        }
-    }
-
-    // 3. Crisp outer Fresnel rim border
+    // 2. Single razor-crisp outer Fresnel rim hairline
     val strokePx = if (highContrast) {
         LiquidGlassMetrics.RimWidthHighContrast.toPx()
     } else {
-        LiquidGlassMetrics.RimWidthStandard.toPx()
+        0.8.dp.toPx()
     }
     val halfStroke = strokePx / 2f
     val outerWidth = (size.width - strokePx).coerceAtLeast(0f)
@@ -301,10 +261,10 @@ internal fun DrawScope.drawLiquidGlassOptics(
         val outerRimBrush = if (colors.isDark) {
             Brush.linearGradient(
                 colorStops = arrayOf(
-                    0.0f to colors.specularTopHighlight.copy(alpha = 0.78f),
-                    0.28f to colors.rimBorder.copy(alpha = 0.36f),
-                    0.72f to colors.rimBorder.copy(alpha = 0.20f),
-                    1.0f to colors.specularBottomHighlight.copy(alpha = 0.45f)
+                    0.0f to Color.White.copy(alpha = 0.34f),
+                    0.26f to Color.White.copy(alpha = 0.11f),
+                    0.74f to Color.White.copy(alpha = 0.07f),
+                    1.0f to Color.White.copy(alpha = 0.18f)
                 ),
                 start = Offset.Zero,
                 end = Offset(size.width, size.height)
@@ -312,10 +272,10 @@ internal fun DrawScope.drawLiquidGlassOptics(
         } else {
             Brush.linearGradient(
                 colorStops = arrayOf(
-                    0.0f to Color.White.copy(alpha = 0.92f),
-                    0.30f to Color(0xFF0F172A).copy(alpha = 0.16f),
-                    0.72f to Color(0xFF0F172A).copy(alpha = 0.12f),
-                    1.0f to Color(0xFF0F172A).copy(alpha = 0.22f)
+                    0.0f to Color.White.copy(alpha = 0.80f),
+                    0.28f to Color(0xFF0F172A).copy(alpha = 0.10f),
+                    0.74f to Color(0xFF0F172A).copy(alpha = 0.07f),
+                    1.0f to Color(0xFF0F172A).copy(alpha = 0.14f)
                 ),
                 start = Offset.Zero,
                 end = Offset(size.width, size.height)

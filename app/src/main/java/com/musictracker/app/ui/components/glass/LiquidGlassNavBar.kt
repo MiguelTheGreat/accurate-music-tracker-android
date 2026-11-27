@@ -351,10 +351,10 @@ fun LiquidGlassNavBar(
                         scaleY = lensScaleYState.value - (travelStretch * 0.25f)
                     }
                     .shadow(
-                        elevation = if (isLensSwollen) 10.dp else 3.dp,
+                        elevation = if (isLensSwollen) 8.dp else 1.dp,
                         shape = LiquidGlassShapes.Capsule,
-                        ambientColor = colors.accentBlue.copy(alpha = if (colors.isDark) 0.35f else 0.20f),
-                        spotColor = colors.accentBlue.copy(alpha = if (colors.isDark) 0.45f else 0.26f),
+                        ambientColor = Color.Black.copy(alpha = if (colors.isDark) 0.24f else 0.08f),
+                        spotColor = Color.Black.copy(alpha = if (colors.isDark) 0.30f else 0.12f),
                         clip = false
                     )
                     .clip(LiquidGlassShapes.Capsule)
@@ -366,38 +366,25 @@ fun LiquidGlassNavBar(
                         val lensFillBrush = if (accessibility.reduceTransparency) {
                             Brush.verticalGradient(
                                 listOf(
-                                    colors.accentBlue.copy(alpha = if (colors.isDark) 0.34f else 0.22f),
-                                    colors.accentBlue.copy(alpha = if (colors.isDark) 0.28f else 0.18f)
+                                    colors.accentBlue.copy(alpha = if (colors.isDark) 0.28f else 0.18f),
+                                    colors.accentBlue.copy(alpha = if (colors.isDark) 0.22f else 0.14f)
                                 )
                             )
                         } else if (!colors.isDark) {
-                            // Light Mode: cool-white top caustic -> soft accentBlue glass tint -> bottom reflection
+                            // Light Mode: clean luminous white glass pill (Apple iOS 26 tab pill)
                             Brush.verticalGradient(
                                 colorStops = arrayOf(
-                                    0.0f to Color(0xFFF8FBFF).copy(
-                                        alpha = (0.85f + 0.12f * glowAlpha).coerceAtMost(0.98f)
-                                    ),
-                                    0.46f to colors.accentBlue.copy(
-                                        alpha = (0.18f + 0.10f * glowAlpha).coerceAtMost(1f)
-                                    ),
-                                    1.0f to colors.accentBlue.copy(
-                                        alpha = (0.10f + 0.08f * glowAlpha).coerceAtMost(1f)
-                                    )
+                                    0.0f to Color.White.copy(alpha = (0.86f + 0.08f * glowAlpha).coerceAtMost(0.95f)),
+                                    1.0f to Color(0xFFF3F6FC).copy(alpha = (0.74f + 0.10f * glowAlpha).coerceAtMost(0.90f))
                                 )
                             )
                         } else {
-                            // Dark Mode: luminous top catchlight -> vibrant glass tint -> bottom bounce
+                            // Dark Mode: understated translucent glass capsule (no harsh spotlight)
                             Brush.verticalGradient(
                                 colorStops = arrayOf(
-                                    0.0f to Color.White.copy(
-                                        alpha = (0.28f + 0.20f * glowAlpha).coerceAtMost(1f)
-                                    ),
-                                    0.45f to colors.accentBlue.copy(
-                                        alpha = (0.24f + 0.12f * glowAlpha).coerceAtMost(1f)
-                                    ),
-                                    1.0f to colors.accentBlue.copy(
-                                        alpha = (0.14f + 0.10f * glowAlpha).coerceAtMost(1f)
-                                    )
+                                    0.0f to Color.White.copy(alpha = (0.15f + 0.09f * glowAlpha).coerceAtMost(0.28f)),
+                                    0.55f to Color.White.copy(alpha = (0.10f + 0.06f * glowAlpha).coerceAtMost(0.20f)),
+                                    1.0f to Color.White.copy(alpha = (0.08f + 0.06f * glowAlpha).coerceAtMost(0.18f))
                                 )
                             )
                         }
@@ -407,55 +394,11 @@ fun LiquidGlassNavBar(
                             cornerRadius = cornerRadius
                         )
 
-                        // Inner caustic crescent / arc for convex refractive lens depth
-                        if (!accessibility.reduceTransparency && !accessibility.highContrast) {
-                            val innerInsetPx = 1.5.dp.toPx()
-                            val innerStrokePx = 1.2.dp.toPx()
-                            val innerWidth = size.width - (innerInsetPx * 2f)
-                            val innerHeight = size.height - (innerInsetPx * 2f)
-                            if (innerWidth > 2f && innerHeight > 2f) {
-                                val innerRadius = (radius - innerInsetPx).coerceAtLeast(0f)
-                                val innerCausticBrush = if (!colors.isDark) {
-                                    Brush.verticalGradient(
-                                        colorStops = arrayOf(
-                                            0.0f to Color.White.copy(alpha = 0.92f),
-                                            0.38f to Color.White.copy(alpha = 0.18f),
-                                            0.72f to Color.Transparent,
-                                            1.0f to colors.accentBlue.copy(
-                                                alpha = (0.20f + 0.14f * glowAlpha).coerceAtMost(1f)
-                                            )
-                                        )
-                                    )
-                                } else {
-                                    Brush.verticalGradient(
-                                        colorStops = arrayOf(
-                                            0.0f to Color.White.copy(
-                                                alpha = (0.44f + 0.30f * glowAlpha).coerceAtMost(1f)
-                                            ),
-                                            0.34f to Color(0xFF9CD4FF).copy(
-                                                alpha = (0.12f + 0.12f * glowAlpha).coerceAtMost(1f)
-                                            ),
-                                            0.72f to Color.Transparent,
-                                            1.0f to colors.accentBlue.copy(
-                                                alpha = (0.22f + 0.24f * glowAlpha).coerceAtMost(1f)
-                                            )
-                                        )
-                                    )
-                                }
-                                drawRoundRect(
-                                    brush = innerCausticBrush,
-                                    topLeft = Offset(innerInsetPx, innerInsetPx),
-                                    size = Size(innerWidth, innerHeight),
-                                    cornerRadius = CornerRadius(innerRadius, innerRadius),
-                                    style = Stroke(width = innerStrokePx)
-                                )
-                            }
-                        }
-
+                        // Single crisp hairline specular rim
                         val strokePx = if (accessibility.highContrast) {
                             LiquidGlassMetrics.RimWidthHighContrast.toPx()
                         } else {
-                            (if (isLensSwollen) 1.35.dp else 0.95.dp).toPx()
+                            (if (isLensSwollen) 1.0.dp else 0.75.dp).toPx()
                         }
                         val halfStroke = strokePx / 2f
                         val insetRadius = (radius - halfStroke).coerceAtLeast(0f)
@@ -469,36 +412,19 @@ fun LiquidGlassNavBar(
                             !colors.isDark -> {
                                 Brush.verticalGradient(
                                     colorStops = arrayOf(
-                                        0.0f to Color.White.copy(alpha = 0.95f),
-                                        0.45f to Color(0xFF1E3A5F).copy(
-                                            alpha = (0.24f + 0.14f * glowAlpha).coerceAtMost(1f)
-                                        ),
-                                        1.0f to colors.accentBlue.copy(
-                                            alpha = (0.28f + 0.16f * glowAlpha).coerceAtMost(1f)
-                                        )
+                                        0.0f to Color.White.copy(alpha = 0.92f),
+                                        0.5f to Color(0xFF0F172A).copy(alpha = 0.08f),
+                                        1.0f to Color(0xFF0F172A).copy(alpha = 0.12f)
                                     )
                                 )
                             }
 
                             else -> {
-                                // Subtle chromatic top/bottom rim glint when swollen/dragging in Dark Mode
-                                val topRim = lerp(
-                                    colors.specularTopHighlight,
-                                    Color(0xFFA8E6FF),
-                                    0.35f * glowAlpha
-                                ).copy(alpha = (0.62f + 0.34f * glowAlpha).coerceAtMost(1f))
-                                val bottomRim = lerp(
-                                    colors.specularBottomHighlight,
-                                    Color(0xFFC4B5FD),
-                                    0.40f * glowAlpha
-                                ).copy(alpha = (0.44f + 0.36f * glowAlpha).coerceAtMost(1f))
                                 Brush.verticalGradient(
                                     colorStops = arrayOf(
-                                        0.0f to topRim,
-                                        0.5f to colors.rimBorder.copy(
-                                            alpha = (0.38f + 0.28f * glowAlpha).coerceAtMost(1f)
-                                        ),
-                                        1.0f to bottomRim
+                                        0.0f to Color.White.copy(alpha = (0.30f + 0.16f * glowAlpha).coerceAtMost(0.50f)),
+                                        0.5f to Color.White.copy(alpha = (0.10f + 0.08f * glowAlpha).coerceAtMost(0.22f)),
+                                        1.0f to Color.White.copy(alpha = (0.16f + 0.10f * glowAlpha).coerceAtMost(0.30f))
                                     )
                                 )
                             }
@@ -521,23 +447,22 @@ fun LiquidGlassNavBar(
                 enabled = !accessibility.reduceTransparency && !accessibility.reduceMotion
             )
 
-            // Foreground tab items — magnified through the AGSL lens beneath the sliding pill
+            // Foreground tab items — razor-sharp at rest; magnified through the AGSL lens while pressing/gliding
             Row(
                 modifier = Modifier
                     .liquidLensContent(
-                        enabled = !accessibility.reduceTransparency,
+                        enabled = !accessibility.reduceTransparency && !accessibility.reduceMotion,
                         optics = LiquidGlassOpticsTokens.NavLens,
                         isDark = colors.isDark,
                         lightDirection = lensLightDirection
                     ) {
+                        val travelDelta = abs(animatedLensIndexState.value - targetLensFloat)
+                        val glow = lensGlowAlphaState.value
+                        if (glow < 0.02f && travelDelta < 0.015f) return@liquidLensContent null
+
                         val stridePx = (tabWidth + tabGap).toPx()
-                        val travelStretch = if (accessibility.reduceMotion) {
-                            0f
-                        } else {
-                            abs(animatedLensIndexState.value - targetLensFloat)
-                                .coerceIn(0f, 1f) * 0.14f
-                        }
-                        val boost = 1f + (lensGlowAlphaState.value * 0.08f)
+                        val travelStretch = travelDelta.coerceIn(0f, 1f) * 0.12f
+                        val boost = 1f + (glow * 0.04f)
                         LiquidLensGeometry(
                             left = animatedLensIndexState.value * stridePx,
                             top = 0f,
