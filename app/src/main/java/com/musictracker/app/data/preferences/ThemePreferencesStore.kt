@@ -14,7 +14,8 @@ import java.io.IOException
 enum class ThemeMode(val storageValue: String) {
     SYSTEM("system"),
     LIGHT("light"),
-    DARK("dark");
+    DARK("dark"),
+    AMOLED("amoled");
 
     companion object {
         fun fromStorageValue(raw: String?): ThemeMode =

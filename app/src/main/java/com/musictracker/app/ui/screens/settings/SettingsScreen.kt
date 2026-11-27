@@ -401,13 +401,18 @@ fun SettingsScreenContent(
                             color = colors.labelPrimary
                         )
                         Text(
-                            text = "Follow your system theme or force Light or Dark Liquid Glass.",
+                            text = "Follow your system theme or force Light, Dark, or AMOLED Black Liquid Glass.",
                             style = MaterialTheme.typography.bodySmall,
                             color = colors.labelSecondary
                         )
                     }
                     LiquidGlassSegmentedControl(
-                        options = listOf(ThemeMode.SYSTEM, ThemeMode.LIGHT, ThemeMode.DARK),
+                        options = listOf(
+                            ThemeMode.SYSTEM,
+                            ThemeMode.LIGHT,
+                            ThemeMode.DARK,
+                            ThemeMode.AMOLED
+                        ),
                         selectedOption = uiState.themeMode,
                         onOptionSelected = onSelectThemeMode,
                         labelProvider = { mode ->
@@ -415,6 +420,7 @@ fun SettingsScreenContent(
                                 ThemeMode.SYSTEM -> "System"
                                 ThemeMode.LIGHT -> "Light"
                                 ThemeMode.DARK -> "Dark"
+                                ThemeMode.AMOLED -> "AMOLED"
                             }
                         },
                         testTagProvider = TestTags::settingsThemeMode,

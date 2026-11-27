@@ -19,6 +19,7 @@ object LiquidGlassTheme {
 @Composable
 fun MusicTrackerTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
+    amoledBlack: Boolean = false,
     reduceTransparency: Boolean = false,
     accessibilityOverride: LiquidGlassAccessibilityState? = null,
     content: @Composable () -> Unit
@@ -26,7 +27,11 @@ fun MusicTrackerTheme(
     val accessibilityState = accessibilityOverride
         ?: rememberLiquidGlassAccessibilityState(reduceTransparency = reduceTransparency)
 
-    val basePalette = if (darkTheme) DarkLiquidGlassPalette else LightLiquidGlassPalette
+    val basePalette = when {
+        darkTheme && amoledBlack -> AmoledLiquidGlassPalette
+        darkTheme -> DarkLiquidGlassPalette
+        else -> LightLiquidGlassPalette
+    }
     val palette = if (accessibilityState.highContrast) {
         basePalette.copy(
             labelPrimary = if (darkTheme) Color.White else Color.Black,

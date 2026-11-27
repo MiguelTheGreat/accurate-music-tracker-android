@@ -350,12 +350,18 @@ fun LiquidGlassNavBar(
                         scaleX = lensScaleXState.value + travelStretch
                         scaleY = lensScaleYState.value - (travelStretch * 0.25f)
                     }
-                    .shadow(
-                        elevation = if (isLensSwollen) 8.dp else 1.dp,
-                        shape = LiquidGlassShapes.Capsule,
-                        ambientColor = Color.Black.copy(alpha = if (colors.isDark) 0.24f else 0.08f),
-                        spotColor = Color.Black.copy(alpha = if (colors.isDark) 0.30f else 0.12f),
-                        clip = false
+                    .then(
+                        if (!colors.isDark) {
+                            Modifier.shadow(
+                                elevation = if (isLensSwollen) 6.dp else 1.dp,
+                                shape = LiquidGlassShapes.Capsule,
+                                ambientColor = Color.Black.copy(alpha = 0.08f),
+                                spotColor = Color.Black.copy(alpha = 0.12f),
+                                clip = false
+                            )
+                        } else {
+                            Modifier
+                        }
                     )
                     .clip(LiquidGlassShapes.Capsule)
                     .drawBehind {

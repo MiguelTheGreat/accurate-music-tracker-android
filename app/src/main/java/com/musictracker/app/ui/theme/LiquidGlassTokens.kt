@@ -94,6 +94,18 @@ val DarkLiquidGlassPalette = LiquidGlassColorPalette(
     accentRed = Color(0xFFFF453A)
 )
 
+val AmoledLiquidGlassPalette = DarkLiquidGlassPalette.copy(
+    regularFill = Color(0x8A060608),
+    regularFillFallback = Color(0xD9060608),
+    regularFillReducedTransparency = Color(0xF508080B),
+    scrollEdgeTint = Color(0xA6000000),
+    contentBackground = Color(0xFF000000),
+    standardCardFill = Color(0xFF0A0A0D),
+    standardCardElevatedFill = Color(0xFF141419),
+    standardCardBorder = Color(0x24FFFFFF),
+    controlTrackFill = Color(0xFF121216)
+)
+
 val LightLiquidGlassPalette = LiquidGlassColorPalette(
     isDark = false,
     regularFill = Color(0x78FFFFFF),

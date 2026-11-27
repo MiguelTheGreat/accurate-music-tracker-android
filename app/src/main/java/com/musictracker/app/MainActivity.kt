@@ -30,8 +30,9 @@ class MainActivity : ComponentActivity() {
             val isDarkTheme = when (themeMode) {
                 ThemeMode.SYSTEM -> isSystemInDarkTheme()
                 ThemeMode.LIGHT -> false
-                ThemeMode.DARK -> true
+                ThemeMode.DARK, ThemeMode.AMOLED -> true
             }
+            val isAmoledBlack = themeMode == ThemeMode.AMOLED
 
             DisposableEffect(isDarkTheme) {
                 enableEdgeToEdge(
@@ -51,6 +52,7 @@ class MainActivity : ComponentActivity() {
 
             MusicTrackerTheme(
                 darkTheme = isDarkTheme,
+                amoledBlack = isAmoledBlack,
                 reduceTransparency = reduceTransparency
             ) {
                 MusicTrackerNavHost(appContainer = appContainer)

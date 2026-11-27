@@ -60,10 +60,12 @@ object TestTags {
     const val SETTINGS_THEME_SYSTEM = "SETTINGS_THEME_SYSTEM"
     const val SETTINGS_THEME_LIGHT = "SETTINGS_THEME_LIGHT"
     const val SETTINGS_THEME_DARK = "SETTINGS_THEME_DARK"
+    const val SETTINGS_THEME_AMOLED = "SETTINGS_THEME_AMOLED"
 
     fun settingsThemeMode(mode: ThemeMode): String = when (mode) {
         ThemeMode.SYSTEM -> SETTINGS_THEME_SYSTEM
         ThemeMode.LIGHT -> SETTINGS_THEME_LIGHT
         ThemeMode.DARK -> SETTINGS_THEME_DARK
+        ThemeMode.AMOLED -> SETTINGS_THEME_AMOLED
     }
 }

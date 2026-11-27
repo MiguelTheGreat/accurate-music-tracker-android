@@ -261,10 +261,18 @@ fun <T> LiquidGlassSegmentedControl(
                         scaleX = thumbScaleX + travelStretch
                         scaleY = thumbScaleY - (travelStretch * 0.20f)
                     }
-                    .shadow(
-                        elevation = if (isLifted) 6.dp else 1.dp,
-                        shape = LiquidGlassShapes.ControlThumb,
-                        clip = false
+                    .then(
+                        if (!colors.isDark) {
+                            Modifier.shadow(
+                                elevation = if (isLifted) 4.dp else 1.dp,
+                                shape = LiquidGlassShapes.ControlThumb,
+                                ambientColor = Color.Black.copy(alpha = 0.08f),
+                                spotColor = Color.Black.copy(alpha = 0.12f),
+                                clip = false
+                            )
+                        } else {
+                            Modifier
+                        }
                     )
                     .clip(LiquidGlassShapes.ControlThumb)
                     .background(thumbFill)
