@@ -146,14 +146,28 @@ fun ListeningRhythmCard(
 
         Spacer(modifier = Modifier.height(6.dp))
 
-        // Minimal x-axis labels (12a, 6a, 12p, 6p)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            listOf("12a", "6a", "12p", "6p").forEach { label ->
+        // Properly aligned 24-hour x-axis labels: each quarter spans exactly 6 bars
+        // (hours 0..5, 6..11, 12..17, 18..23) so 6a=25%, 12p=50%, 6p=75%, 12a=100%.
+        Row(modifier = Modifier.fillMaxWidth()) {
+            listOf("12a", "6a", "12p").forEach { label ->
                 Text(
                     text = label,
+                    style = MaterialTheme.typography.labelSmall.withTabularNumerals(),
+                    color = colors.labelTertiary,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            Row(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "6p",
+                    style = MaterialTheme.typography.labelSmall.withTabularNumerals(),
+                    color = colors.labelTertiary
+                )
+                Text(
+                    text = "12a",
                     style = MaterialTheme.typography.labelSmall.withTabularNumerals(),
                     color = colors.labelTertiary
                 )
