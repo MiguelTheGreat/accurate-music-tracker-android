@@ -113,13 +113,16 @@ class AndroidMediaControllerAdapter(
     }
 }
 
+internal const val METADATA_KEY_ADVERTISEMENT = "android.media.metadata.ADVERTISEMENT"
+
 fun MediaMetadata.toDomainSnapshot(): MediaMetadataSnapshot {
     val title = firstNonBlank(
         getString(MediaMetadata.METADATA_KEY_TITLE),
         getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE)
     ).orEmpty()
 
-    val displaySubtitle = getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE)
+    val rawDisplaySubtitle = getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE)
+    val displaySubtitle = rawDisplaySubtitle
         ?.takeUnless { AdAndPlaceholderFilter.isPlaceholderSubtitle(it) }
 
     val artist = firstNonBlank(
@@ -141,12 +144,16 @@ fun MediaMetadata.toDomainSnapshot(): MediaMetadataSnapshot {
         getString(MediaMetadata.METADATA_KEY_DISPLAY_ICON_URI)
     )
 
+    val isAdvertisement = getLong(METADATA_KEY_ADVERTISEMENT) > 0L ||
+        AdAndPlaceholderFilter.isAdLabel(rawDisplaySubtitle)
+
     return MediaMetadataSnapshot(
         title = title,
         artist = artist,
         album = album,
         durationMs = durationMs,
-        artworkUri = artworkUri
+        artworkUri = artworkUri,
+        isAdvertisement = isAdvertisement
     )
 }
 
@@ -279,7 +286,7 @@ class MediaSessionCoordinator(
         snapshot: MediaMetadataSnapshot
     ) {
         val repo = artworkRepository ?: return
-        if (snapshot.title.isBlank()) return
+        if (snapshot.title.isBlank() || AdAndPlaceholderFilter.isAdOrPlaceholder(snapshot)) return
         val dedupKey = metadataNormalizer.normalize(snapshot.title, snapshot.artist).dedupKey
         if (dedupKey.isBlank()) return
         if (repo.getCachedTrackArtworkFile(dedupKey) != null) return
@@ -493,9 +500,12 @@ class MediaSessionCoordinator(
             if (candidate != null) {
                 val previousFocused = attachedControllers[focusedTokenId]
                 focusedTokenId = candidate.key
+                val candidateMeta = candidate.value.cachedMetadata
                 if (
-                    candidate.value.cachedMetadata?.title.isNullOrBlank() &&
-                    previousFocused != null
+                    previousFocused != null &&
+                    (candidateMeta == null ||
+                        candidateMeta.title.isBlank() ||
+                        AdAndPlaceholderFilter.isAdOrPlaceholder(candidateMeta))
                 ) {
                     emitted += playSessionEngine.onSessionEnded(previousFocused.controller.packageName)
                 }
@@ -591,9 +601,12 @@ class MediaSessionCoordinator(
                 engineTouched = true
                 val previousFocused = focusedTokenId?.let { attachedControllers[it] }
                 focusedTokenId = tokenId
+                val incomingMeta = entry.cachedMetadata
                 if (
-                    entry.cachedMetadata?.title.isNullOrBlank() &&
-                    previousFocused != null
+                    previousFocused != null &&
+                    (incomingMeta == null ||
+                        incomingMeta.title.isBlank() ||
+                        AdAndPlaceholderFilter.isAdOrPlaceholder(incomingMeta))
                 ) {
                     results += playSessionEngine.onSessionEnded(previousFocused.controller.packageName)
                 }

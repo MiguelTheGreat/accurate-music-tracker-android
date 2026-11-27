@@ -5,5 +5,6 @@ data class MediaMetadataSnapshot(
     val artist: String,
     val album: String = "",
     val durationMs: Long = 0L,
-    val artworkUri: String? = null
+    val artworkUri: String? = null,
+    val isAdvertisement: Boolean = false
 )

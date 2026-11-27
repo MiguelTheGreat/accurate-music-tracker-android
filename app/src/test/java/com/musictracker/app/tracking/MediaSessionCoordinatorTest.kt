@@ -16,6 +16,7 @@ import com.musictracker.app.domain.model.NowTrackingState
 import com.musictracker.app.domain.model.PlaybackEvent
 import com.musictracker.app.domain.model.PlaybackStateSnapshot
 import com.musictracker.app.domain.model.PlaybackStatus
+import com.musictracker.app.domain.normalization.AdAndPlaceholderFilter
 import com.musictracker.app.domain.normalization.MusicMetadataNormalizer
 import com.musictracker.app.domain.tracking.PlaySessionEngine
 import com.musictracker.app.domain.tracking.PlaySessionStateMachine
@@ -243,6 +244,63 @@ class MediaSessionCoordinatorTest {
         assertEquals(PlaybackStatus.PLAYING, unknownPosState.status)
         assertEquals(PlaybackState.PLAYBACK_POSITION_UNKNOWN, unknownPosState.positionMs)
         assertEquals(-1L, unknownPosState.positionMs)
+    }
+
+    @Test
+    fun toDomainSnapshot_preservesAdSubtitleReadsAdvertisementFlagAndStripsPlaceholderSubtitle() {
+        // Case A: Non-ad placeholder subtitle ("Recommended for you") is stripped without marking as ad
+        val placeholderSubtitleSnapshot = MediaMetadata.Builder()
+            .putString(MediaMetadata.METADATA_KEY_TITLE, "Blinding Lights")
+            .putString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE, "Recommended for you")
+            .build()
+            .toDomainSnapshot()
+
+        assertEquals("Blinding Lights", placeholderSubtitleSnapshot.title)
+        assertEquals("", placeholderSubtitleSnapshot.artist)
+        assertFalse(placeholderSubtitleSnapshot.isAdvertisement)
+        assertFalse(AdAndPlaceholderFilter.isAdOrPlaceholder(placeholderSubtitleSnapshot))
+
+        // Case B1: Ad label in DISPLAY_SUBTITLE with no ARTIST preserves ad signal via isAdvertisement
+        val spotifySubtitleAd = MediaMetadata.Builder()
+            .putString(MediaMetadata.METADATA_KEY_TITLE, "Spotify")
+            .putString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE, "Advertisement • 1 of 2")
+            .build()
+            .toDomainSnapshot()
+
+        assertTrue(spotifySubtitleAd.isAdvertisement)
+        assertTrue(AdAndPlaceholderFilter.isAdOrPlaceholder(spotifySubtitleAd))
+
+        // Case B2: Ad label in DISPLAY_SUBTITLE even when ARTIST is a brand name
+        val brandWithSponsoredSubtitle = MediaMetadata.Builder()
+            .putString(MediaMetadata.METADATA_KEY_TITLE, "Summer Savings")
+            .putString(MediaMetadata.METADATA_KEY_ARTIST, "Acme Brand")
+            .putString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE, "Sponsored")
+            .build()
+            .toDomainSnapshot()
+
+        assertTrue(brandWithSponsoredSubtitle.isAdvertisement)
+        assertTrue(AdAndPlaceholderFilter.isAdOrPlaceholder(brandWithSponsoredSubtitle))
+
+        // Case C: android.media.metadata.ADVERTISEMENT flag (1L vs 0L vs absent)
+        val flaggedAd = MediaMetadata.Builder()
+            .putString(MediaMetadata.METADATA_KEY_TITLE, "Brand Jingle")
+            .putString(MediaMetadata.METADATA_KEY_ARTIST, "Brand Co")
+            .putLong(METADATA_KEY_ADVERTISEMENT, 1L)
+            .build()
+            .toDomainSnapshot()
+
+        assertTrue(flaggedAd.isAdvertisement)
+        assertTrue(AdAndPlaceholderFilter.isAdOrPlaceholder(flaggedAd))
+
+        val zeroFlaggedTrack = MediaMetadata.Builder()
+            .putString(MediaMetadata.METADATA_KEY_TITLE, "Blinding Lights")
+            .putString(MediaMetadata.METADATA_KEY_ARTIST, "The Weeknd")
+            .putLong(METADATA_KEY_ADVERTISEMENT, 0L)
+            .build()
+            .toDomainSnapshot()
+
+        assertFalse(zeroFlaggedTrack.isAdvertisement)
+        assertFalse(AdAndPlaceholderFilter.isAdOrPlaceholder(zeroFlaggedTrack))
     }
 
     @Test
@@ -754,6 +812,54 @@ class MediaSessionCoordinatorTest {
         assertEquals(callsAfterPause, countingEngine.onPlaybackEventCalls)
         assertEquals("com.google.android.apps.youtube.music", coordinator.nowTracking.value?.sourcePackage)
         assertFalse(coordinator.nowTracking.value!!.isPlaying)
+
+        coordinator.flushAndStop().join()
+    }
+
+    @Test
+    fun focusSwitchToPlayingNonBlankAd_finalizesPreviousImmediatelyWithExactDuration() = runTest {
+        val coordinator = createCoordinator(this)
+        coordinator.start()
+        runCurrent()
+
+        val ytMusic = FakeTrackedMediaController(
+            tokenId = "ytm-real",
+            packageName = "com.google.android.apps.youtube.music",
+            metadata = buildMetadata(title = "Real Song", artist = "Real Artist", durationMs = 200_000L),
+            playbackState = buildPlaybackState(PlaybackState.STATE_PLAYING)
+        )
+        val spotifyAd = FakeTrackedMediaController(
+            tokenId = "sp-ad",
+            packageName = "com.spotify.music",
+            metadata = buildMetadata(title = "Spotify", artist = "Advertisement • 1 of 2", durationMs = 30_000L),
+            playbackState = buildPlaybackState(PlaybackState.STATE_PAUSED)
+        )
+        coordinator.onActiveSessionsChanged(listOf(ytMusic, spotifyAd))
+        runCurrent()
+
+        // Play YTM for 10s (past debounce).
+        clock.advanceBy(10_000L)
+        advanceTimeBy(10_000L)
+        runCurrent()
+        assertFalse(coordinator.nowTracking.value!!.isDebouncing)
+
+        // Spotify non-blank ad takes audio focus and begins PLAYING, then YTM pauses.
+        spotifyAd.emitPlaybackState(buildPlaybackState(PlaybackState.STATE_PLAYING, positionMs = 0L))
+        ytMusic.emitPlaybackState(buildPlaybackState(PlaybackState.STATE_PAUSED, positionMs = 10_000L))
+        runCurrent()
+
+        assertNull(coordinator.nowTracking.value)
+
+        // 30s ad elapses; YTM must NOT accumulate ad time.
+        clock.advanceBy(30_000L)
+        advanceTimeBy(30_000L)
+        runCurrent()
+
+        assertNull(coordinator.nowTracking.value)
+        val events = database.listenEventDao().getAll()
+        assertEquals(1, events.size)
+        assertEquals("com.google.android.apps.youtube.music", events.single().sourcePackage)
+        assertEquals(10_000L, events.single().actualListenedMs)
 
         coordinator.flushAndStop().join()
     }

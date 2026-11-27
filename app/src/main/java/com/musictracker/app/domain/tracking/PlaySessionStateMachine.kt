@@ -188,15 +188,18 @@ class PlaySessionStateMachine(
         now: Long,
         emitted: MutableList<CompletedListenSession>
     ): Boolean {
-        if (metadata.title.isBlank()) {
-            return false
-        }
-
-        if (AdAndPlaceholderFilter.isAdOrPlaceholder(metadata)) {
+        if (
+            metadata.isAdvertisement ||
+            (metadata.title.isNotBlank() && AdAndPlaceholderFilter.isAdOrPlaceholder(metadata))
+        ) {
             if (currentSession?.identity?.sourcePackage == pkg) {
                 finalizeOrDiscardCurrent(now, isLoopRestart = false, emitted = emitted)
             }
             latestMetadataByPackage.remove(pkg)
+            return false
+        }
+
+        if (metadata.title.isBlank()) {
             return false
         }
 
@@ -338,9 +341,22 @@ class PlaySessionStateMachine(
         now: Long,
         emitted: MutableList<CompletedListenSession>
     ): Boolean {
-        if (metadata != null && metadata.title.isNotBlank() && AdAndPlaceholderFilter.isAdOrPlaceholder(metadata)) {
-            if (currentSession?.identity?.sourcePackage == pkg) {
-                finalizeOrDiscardCurrent(now, isLoopRestart = false, emitted = emitted, state = state)
+        if (
+            metadata != null &&
+            (metadata.isAdvertisement ||
+                (metadata.title.isNotBlank() && AdAndPlaceholderFilter.isAdOrPlaceholder(metadata)))
+        ) {
+            val activeSession = currentSession
+            if (
+                activeSession != null &&
+                (activeSession.identity.sourcePackage == pkg || state?.status == PlaybackStatus.PLAYING)
+            ) {
+                finalizeOrDiscardCurrent(
+                    now = now,
+                    isLoopRestart = false,
+                    emitted = emitted,
+                    state = if (activeSession.identity.sourcePackage == pkg) state else null
+                )
             }
             latestMetadataByPackage.remove(pkg)
             if (state != null) {

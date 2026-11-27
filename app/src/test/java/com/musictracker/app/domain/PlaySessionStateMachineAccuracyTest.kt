@@ -294,6 +294,72 @@ class PlaySessionStateMachineAccuracyTest {
     }
 
     @Test
+    fun spotifyArtistAdAndIsAdvertisementFlag_finalizeRealSongAndAreIgnored() {
+        val clock = FakeClock(elapsedMs = 10_000L)
+        val engine = PlaySessionStateMachine(clock = clock, normalizer = MusicMetadataNormalizer())
+
+        // 1. Spotify artist-field ad ("Spotify" / "Advertisement • 1 of 2")
+        engine.onPlaybackEvent(PlaybackEvent.MetadataChanged(pkg, blindingLights))
+        engine.onPlaybackEvent(
+            PlaybackEvent.StateChanged(pkg, PlaybackStateSnapshot(PlaybackStatus.PLAYING, 0L))
+        )
+        clock.advanceBy(40_000L)
+        val spotifyAd = MediaMetadataSnapshot(
+            title = "Spotify",
+            artist = "Advertisement • 1 of 2",
+            durationMs = 30_000L
+        )
+        val emitted1 = engine.onPlaybackEvent(PlaybackEvent.MetadataChanged(pkg, spotifyAd))
+        assertEquals(1, emitted1.size)
+        assertEquals("Blinding Lights", emitted1[0].rawTitle)
+        assertEquals(40_000L, emitted1[0].actualListenedMs)
+        assertNull(engine.nowTracking.value)
+
+        clock.advanceBy(10_000L)
+        val duringSpotifyAd = engine.onPlaybackEvent(
+            PlaybackEvent.StateChanged(pkg, PlaybackStateSnapshot(PlaybackStatus.PLAYING, 10_000L))
+        )
+        assertTrue(duringSpotifyAd.isEmpty())
+        assertNull(engine.nowTracking.value)
+
+        // 2. Explicit isAdvertisement = true with blank title via MetadataChanged
+        engine.onPlaybackEvent(PlaybackEvent.MetadataChanged(pkg, blindingLights))
+        engine.onPlaybackEvent(
+            PlaybackEvent.StateChanged(pkg, PlaybackStateSnapshot(PlaybackStatus.PLAYING, 0L))
+        )
+        clock.advanceBy(30_000L)
+        val blankTitleAd = MediaMetadataSnapshot(
+            title = "",
+            artist = "",
+            durationMs = 15_000L,
+            isAdvertisement = true
+        )
+        val emitted2 = engine.onPlaybackEvent(PlaybackEvent.MetadataChanged(pkg, blankTitleAd))
+        assertEquals(1, emitted2.size)
+        assertEquals("Blinding Lights", emitted2[0].rawTitle)
+        assertEquals(30_000L, emitted2[0].actualListenedMs)
+        assertNull(engine.nowTracking.value)
+
+        // 3. Explicit isAdvertisement = true with blank title via SessionSnapshot
+        engine.onPlaybackEvent(PlaybackEvent.MetadataChanged(pkg, blindingLights))
+        engine.onPlaybackEvent(
+            PlaybackEvent.StateChanged(pkg, PlaybackStateSnapshot(PlaybackStatus.PLAYING, 0L))
+        )
+        clock.advanceBy(25_000L)
+        val emitted3 = engine.onPlaybackEvent(
+            PlaybackEvent.SessionSnapshot(
+                sourcePackage = pkg,
+                metadata = blankTitleAd,
+                state = PlaybackStateSnapshot(PlaybackStatus.PLAYING, 0L)
+            )
+        )
+        assertEquals(1, emitted3.size)
+        assertEquals("Blinding Lights", emitted3[0].rawTitle)
+        assertEquals(25_000L, emitted3[0].actualListenedMs)
+        assertNull(engine.nowTracking.value)
+    }
+
+    @Test
     fun regressionCheck_validScrubbingAndSingleTrackLoopPreserved() {
         val clock = FakeClock(elapsedMs = 10_000L)
         val engine = PlaySessionStateMachine(clock = clock, normalizer = MusicMetadataNormalizer())
@@ -591,5 +657,53 @@ class PlaySessionStateMachineAccuracyTest {
         assertEquals("Track B", emittedB[0].rawTitle)
         assertEquals(120_000L, emittedB[0].actualListenedMs)
         assertFalse(emittedB[0].wasSkipped)
+    }
+
+    @Test
+    fun crossPackagePlayingAdSnapshot_finalizesPreviousSessionWithoutMisapplyingIncomingTimestamp() {
+        val clock = FakeClock(elapsedMs = 10_000L)
+        val engine = PlaySessionStateMachine(clock = clock, normalizer = MusicMetadataNormalizer())
+        val spotifyPkg = "com.spotify.music"
+
+        engine.onPlaybackEvent(PlaybackEvent.MetadataChanged(pkg, blindingLights))
+        engine.onPlaybackEvent(
+            PlaybackEvent.StateChanged(
+                pkg,
+                PlaybackStateSnapshot(
+                    status = PlaybackStatus.PLAYING,
+                    positionMs = 0L,
+                    playbackSpeed = 1.0f,
+                    lastPositionUpdateTimeMs = clock.elapsedMs
+                )
+            )
+        )
+
+        // Play pkgA for 10s (elapsed=20_000L).
+        clock.advanceBy(10_000L)
+
+        // pkgB sends a PLAYING ad snapshot with an earlier lastPositionUpdateTimeMs (12_000L).
+        // pkgA must be finalized at now (10_000L listened), NOT using pkgB's 12_000L timestamp.
+        val emitted = engine.onPlaybackEvent(
+            PlaybackEvent.SessionSnapshot(
+                sourcePackage = spotifyPkg,
+                metadata = MediaMetadataSnapshot(
+                    title = "Spotify",
+                    artist = "Advertisement • 1 of 2",
+                    durationMs = 30_000L
+                ),
+                state = PlaybackStateSnapshot(
+                    status = PlaybackStatus.PLAYING,
+                    positionMs = 0L,
+                    playbackSpeed = 1.0f,
+                    lastPositionUpdateTimeMs = 12_000L
+                )
+            )
+        )
+
+        assertEquals(1, emitted.size)
+        assertEquals(pkg, emitted[0].sourcePackage)
+        assertEquals("Blinding Lights", emitted[0].rawTitle)
+        assertEquals(10_000L, emitted[0].actualListenedMs)
+        assertNull(engine.nowTracking.value)
     }
 }

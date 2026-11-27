@@ -202,12 +202,111 @@ class ArtistDeduplicationAndDataCleanerTest {
         )
         val blankTitleSession = zeroDurationSession.copy(rawTitle = "   ", actualListenedMs = 50_000L)
 
+        val spotifyArtistAdSession = adSession.copy(
+            rawTitle = "Spotify",
+            rawArtist = "Advertisement • 1 of 2"
+        )
+        val spotifyArtistAdSession2 = adSession.copy(
+            rawTitle = "Spotify",
+            rawArtist = "Advertisement • 2 of 2"
+        )
+
         repository.recordCompletedSession(adSession)
+        repository.recordCompletedSession(spotifyArtistAdSession)
+        repository.recordCompletedSession(spotifyArtistAdSession2)
         repository.recordCompletedSession(zeroDurationSession)
         repository.recordCompletedSession(blankTitleSession)
 
         assertTrue(database.trackDao().getAll().isEmpty())
         assertTrue(database.listenEventDao().getAll().isEmpty())
+    }
+
+    @Test
+    fun cleanAndRenormalizeLibrary_removesLegacySpotifyArtistAdRows() = runTest {
+        val trackDao = database.trackDao()
+        val eventDao = database.listenEventDao()
+
+        val spotifyAd1Id = trackDao.insertIgnore(
+            TrackEntity(
+                dedupKey = "advertisement 1 of 2::spotify",
+                normalizedTitle = "Spotify",
+                normalizedArtist = "Advertisement • 1 of 2",
+                album = "",
+                durationMs = 30_000L,
+                rawTitle = "Spotify",
+                rawArtist = "Advertisement • 1 of 2",
+                artworkUriOrHash = null
+            )
+        )
+        val spotifyAd2Id = trackDao.insertIgnore(
+            TrackEntity(
+                dedupKey = "advertisement 2 of 2::spotify",
+                normalizedTitle = "Spotify",
+                normalizedArtist = "Advertisement • 2 of 2",
+                album = "",
+                durationMs = 15_000L,
+                rawTitle = "Spotify",
+                rawArtist = "Advertisement • 2 of 2",
+                artworkUriOrHash = null
+            )
+        )
+        val realTrackId = trackDao.insertIgnore(
+            TrackEntity(
+                dedupKey = "the weeknd::blinding lights",
+                normalizedTitle = "Blinding Lights",
+                normalizedArtist = "The Weeknd",
+                album = "After Hours",
+                durationMs = 200_000L,
+                rawTitle = "Blinding Lights",
+                rawArtist = "The Weeknd",
+                artworkUriOrHash = null
+            )
+        )
+        eventDao.insert(
+            ListenEventEntity(
+                trackId = spotifyAd1Id,
+                sourcePackage = "com.spotify.music",
+                startedAtEpoch = 1_000L,
+                endedAtEpoch = 31_000L,
+                actualListenedMs = 30_000L,
+                completedRatio = 1.0f,
+                wasSkipped = false
+            )
+        )
+        eventDao.insert(
+            ListenEventEntity(
+                trackId = spotifyAd2Id,
+                sourcePackage = "com.spotify.music",
+                startedAtEpoch = 32_000L,
+                endedAtEpoch = 47_000L,
+                actualListenedMs = 15_000L,
+                completedRatio = 1.0f,
+                wasSkipped = false
+            )
+        )
+        eventDao.insert(
+            ListenEventEntity(
+                trackId = realTrackId,
+                sourcePackage = "com.spotify.music",
+                startedAtEpoch = 50_000L,
+                endedAtEpoch = 250_000L,
+                actualListenedMs = 200_000L,
+                completedRatio = 1.0f,
+                wasSkipped = false
+            )
+        )
+
+        val result = repository.cleanAndRenormalizeLibrary()
+        assertEquals(2, result.removedAdTracks)
+        assertEquals(2, result.removedAdEvents)
+
+        val remainingTracks = trackDao.getAll()
+        assertEquals(1, remainingTracks.size)
+        assertEquals("Blinding Lights", remainingTracks[0].normalizedTitle)
+
+        val remainingEvents = eventDao.getAll()
+        assertEquals(1, remainingEvents.size)
+        assertEquals(realTrackId, remainingEvents[0].trackId)
     }
 
     @Test
