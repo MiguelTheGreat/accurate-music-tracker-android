@@ -83,6 +83,7 @@ private enum class BlendSheetTab(val label: String) {
 fun BlendSheet(
     topArtists: List<TopArtistStat>,
     topTracks: List<TopTrackStat>,
+    initialFriendCode: String? = null,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -90,7 +91,11 @@ fun BlendSheet(
     val coroutineScope = rememberCoroutineScope()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    var selectedTab by remember { mutableStateOf(BlendSheetTab.MY_CODE) }
+    var selectedTab by remember {
+        mutableStateOf(
+            if (initialFriendCode.isNullOrBlank()) BlendSheetTab.MY_CODE else BlendSheetTab.COMPARE
+        )
+    }
     var copiedFeedback by remember { mutableStateOf(false) }
 
     val myPayload = remember(topArtists, topTracks) {
@@ -108,7 +113,7 @@ fun BlendSheet(
     }
 
     // Compare tab state
-    var friendCodeInput by remember { mutableStateOf("") }
+    var friendCodeInput by remember { mutableStateOf(initialFriendCode.orEmpty()) }
     var decodeError by remember { mutableStateOf<String?>(null) }
     var comparisonResult by remember { mutableStateOf<BlendComparisonResult?>(null) }
     var selectedAspect by remember { mutableStateOf(ShareAspectRatio.STORY_9_16) }
@@ -116,6 +121,23 @@ fun BlendSheet(
     var isRenderingCard by remember { mutableStateOf(false) }
     var isExporting by remember { mutableStateOf(false) }
     var exportFeedback by remember { mutableStateOf<ShareExportResult?>(null) }
+
+    LaunchedEffect(initialFriendCode, myPayload) {
+        val code = initialFriendCode?.trim()
+        if (!code.isNullOrEmpty()) {
+            selectedTab = BlendSheetTab.COMPARE
+            friendCodeInput = code
+            BlendCalculator.decode(code)
+                .onSuccess { friendPayload ->
+                    decodeError = null
+                    comparisonResult = BlendCalculator.compare(myPayload, friendPayload)
+                }
+                .onFailure { err ->
+                    comparisonResult = null
+                    decodeError = err.message ?: "Invalid Collecto Blend code"
+                }
+        }
+    }
 
     val instagramAvailable = remember(context) {
         ShareCardExporter.isInstagramStoriesAvailable(context)

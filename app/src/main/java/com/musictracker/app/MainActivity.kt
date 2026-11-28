@@ -1,5 +1,6 @@
 package com.musictracker.app
 
+import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -9,15 +10,20 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.musictracker.app.data.preferences.ThemeMode
+import com.musictracker.app.ui.blend.BlendCalculator
 import com.musictracker.app.ui.navigation.MusicTrackerNavHost
 import com.musictracker.app.ui.theme.MusicTrackerTheme
 
 class MainActivity : ComponentActivity() {
+    private val pendingBlendCode = mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        handleIncomingIntent(intent)
         val appContainer = (application as MusicTrackerApplication).appContainer
 
         setContent {
@@ -55,8 +61,25 @@ class MainActivity : ComponentActivity() {
                 amoledBlack = isAmoledBlack,
                 reduceTransparency = reduceTransparency
             ) {
-                MusicTrackerNavHost(appContainer = appContainer)
+                MusicTrackerNavHost(
+                    appContainer = appContainer,
+                    incomingBlendCode = pendingBlendCode.value,
+                    onConsumeIncomingBlendCode = { pendingBlendCode.value = null }
+                )
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIncomingIntent(intent)
+    }
+
+    private fun handleIncomingIntent(intent: Intent?) {
+        val data = intent?.dataString?.trim() ?: return
+        if (data.startsWith(BlendCalculator.PREFIX, ignoreCase = true)) {
+            pendingBlendCode.value = data
         }
     }
 }

@@ -71,10 +71,10 @@ object BlendCalculator {
 
     fun decode(code: String): Result<BlendPayload> = runCatching {
         val trimmed = code.trim()
-        require(trimmed.startsWith(PREFIX)) {
+        require(trimmed.startsWith(PREFIX, ignoreCase = true)) {
             "Code must start with $PREFIX"
         }
-        val encoded = trimmed.removePrefix(PREFIX).trim()
+        val encoded = trimmed.substring(PREFIX.length).trim()
         require(encoded.isNotEmpty()) {
             "Blend code is empty"
         }

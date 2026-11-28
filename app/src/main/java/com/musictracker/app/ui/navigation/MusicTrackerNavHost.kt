@@ -80,12 +80,26 @@ private fun directionalExitTransition(
 @Composable
 fun MusicTrackerNavHost(
     appContainer: AppContainer,
+    incomingBlendCode: String? = null,
+    onConsumeIncomingBlendCode: () -> Unit = {},
     navController: NavHostController = rememberNavController(),
     modifier: Modifier = Modifier
 ) {
     val homeViewModel: HomeViewModel = viewModel(factory = HomeViewModel.factory(appContainer))
     val statsViewModel: StatsViewModel = viewModel(factory = StatsViewModel.factory(appContainer))
     val settingsViewModel: SettingsViewModel = viewModel(factory = SettingsViewModel.factory(appContainer))
+
+    androidx.compose.runtime.LaunchedEffect(incomingBlendCode) {
+        if (!incomingBlendCode.isNullOrBlank()) {
+            navController.navigate(AppDestination.STATS.route) {
+                popUpTo(navController.graph.findStartDestination().id) {
+                    saveState = true
+                }
+                launchSingleTop = true
+                restoreState = true
+            }
+        }
+    }
 
     MusicTrackerNavHost(
         navController = navController,
@@ -97,7 +111,11 @@ fun MusicTrackerNavHost(
             )
         },
         statsContent = {
-            StatsRoute(viewModel = statsViewModel)
+            StatsRoute(
+                viewModel = statsViewModel,
+                incomingBlendCode = incomingBlendCode,
+                onConsumeIncomingBlendCode = onConsumeIncomingBlendCode
+            )
         },
         settingsContent = {
             SettingsRoute(

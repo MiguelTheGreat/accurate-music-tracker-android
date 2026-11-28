@@ -86,12 +86,23 @@ import java.util.Locale
 @Composable
 fun StatsRoute(
     viewModel: StatsViewModel,
+    incomingBlendCode: String? = null,
+    onConsumeIncomingBlendCode: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var shareSheetConfig by remember { mutableStateOf<ShareSheetInitialConfig?>(null) }
     var showShareActionSheet by remember { mutableStateOf(false) }
     var showBlendSheet by remember { mutableStateOf(false) }
+    var pendingBlendCode by remember { mutableStateOf<String?>(null) }
+
+    androidx.compose.runtime.LaunchedEffect(incomingBlendCode) {
+        if (!incomingBlendCode.isNullOrBlank()) {
+            pendingBlendCode = incomingBlendCode
+            showBlendSheet = true
+            onConsumeIncomingBlendCode()
+        }
+    }
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         viewModel.refresh()
@@ -116,6 +127,7 @@ fun StatsRoute(
             },
             onBlendWithFriend = {
                 showShareActionSheet = false
+                pendingBlendCode = null
                 showBlendSheet = true
             },
             onDismiss = { showShareActionSheet = false }
@@ -126,7 +138,11 @@ fun StatsRoute(
         BlendSheet(
             topArtists = uiState.blendTopArtists,
             topTracks = uiState.blendTopTracks,
-            onDismiss = { showBlendSheet = false }
+            initialFriendCode = pendingBlendCode,
+            onDismiss = {
+                showBlendSheet = false
+                pendingBlendCode = null
+            }
         )
     }
 
