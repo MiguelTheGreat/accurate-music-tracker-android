@@ -37,6 +37,13 @@ class LiquidGlassBackdropState(
 val LocalLiquidGlassBackdrop = compositionLocalOf<LiquidGlassBackdropState?> { null }
 
 /**
+ * Provides the recorded content [LiquidGlassBackdropState] specifically to separate-window
+ * overlays (like [LiquidGlassSheet] inside `ModalBottomSheet`) so they can run the exact same
+ * real AGSL blur + refraction pipeline as the bottom dock without self-blur recursion.
+ */
+internal val LocalLiquidGlassSheetBackdrop = compositionLocalOf<LiquidGlassBackdropState?> { null }
+
+/**
  * Two-layer backdrop host for Apple HIG-faithful Liquid Glass in Jetpack Compose:
  * - [content] is the scrollable content layer recorded into a [GraphicsLayer] on API 31+
  *   (when Reduced Transparency is off).
@@ -78,12 +85,18 @@ fun LiquidGlassBackdropHost(
                     }
                 }
         ) {
-            CompositionLocalProvider(LocalLiquidGlassBackdrop provides null) {
+            CompositionLocalProvider(
+                LocalLiquidGlassBackdrop provides null,
+                LocalLiquidGlassSheetBackdrop provides backdropState
+            ) {
                 content()
             }
         }
 
-        CompositionLocalProvider(LocalLiquidGlassBackdrop provides backdropState) {
+        CompositionLocalProvider(
+            LocalLiquidGlassBackdrop provides backdropState,
+            LocalLiquidGlassSheetBackdrop provides backdropState
+        ) {
             overlay()
         }
     }
