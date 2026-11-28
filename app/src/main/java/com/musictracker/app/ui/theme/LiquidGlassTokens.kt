@@ -235,6 +235,17 @@ object LiquidGlassOpticsTokens {
         magnification = 1.04f
     )
 
+    /** Floating bottom sheets: deeper blur + balanced tint so foreground controls stay crisp. */
+    val Sheet = Regular.copy(
+        blurRadius = 24.dp,
+        legacyBlurRadius = 24.dp,
+        refraction = 10.dp,
+        edgeThickness = 16.dp,
+        specularIntensity = 0.26f,
+        tintAlphaScale = 0.88f,
+        luminanceAdaptation = 0.12f
+    )
+
     fun forVariant(isClear: Boolean): LiquidGlassOptics = if (isClear) Clear else Regular
 }
 

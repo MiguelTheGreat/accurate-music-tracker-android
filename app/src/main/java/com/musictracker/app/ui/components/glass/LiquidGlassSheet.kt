@@ -1,5 +1,7 @@
 package com.musictracker.app.ui.components.glass
 
+import android.os.Build
+import android.view.WindowManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,18 +13,25 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogWindowProvider
+import com.musictracker.app.ui.theme.LiquidGlassOpticsTokens
 import com.musictracker.app.ui.theme.LiquidGlassShapes
 import com.musictracker.app.ui.theme.LiquidGlassTheme
 
 /**
  * Floating Apple iOS 26 Liquid Glass sheet:
- * - Always renders as a true [LiquidGlassSurface] (AGSL rim refraction, hairline Fresnel border,
- *   light blur, and subtle sheen) with consistent inset geometry (`12.dp` horizontal margin,
- *   `28.dp` corners) — never snapping or settling to an opaque solid box when expanded.
+ * - Always renders as a true [LiquidGlassSurface] with [LiquidGlassOpticsTokens.Sheet]
+ *   (deeper blur, balanced translucent tint, hairline Fresnel rim) without snapping to opaque.
+ * - On API 31+, also enables native `FLAG_BLUR_BEHIND` (`blurBehindRadius = 28.dp`) on the
+ *   hosting [DialogWindowProvider] window so content behind `ModalBottomSheet` blurs cleanly
+ *   even across the separate dialog window boundary.
  */
 @Composable
 fun LiquidGlassSheet(
@@ -30,6 +39,39 @@ fun LiquidGlassSheet(
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit
 ) {
+    val accessibility = LiquidGlassTheme.accessibility
+    val view = LocalView.current
+    val density = LocalDensity.current
+    val blurBehindPx = with(density) { 28.dp.roundToPx() }
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        DisposableEffect(view, accessibility.reduceTransparency, blurBehindPx) {
+            val window = (view.parent as? DialogWindowProvider)?.window
+            if (window != null) {
+                if (!accessibility.reduceTransparency) {
+                    window.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+                    window.attributes = window.attributes.apply {
+                        blurBehindRadius = blurBehindPx
+                    }
+                } else {
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+                    window.attributes = window.attributes.apply {
+                        blurBehindRadius = 0
+                    }
+                }
+            }
+            onDispose {
+                val w = (view.parent as? DialogWindowProvider)?.window
+                if (w != null) {
+                    w.clearFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+                    w.attributes = w.attributes.apply {
+                        blurBehindRadius = 0
+                    }
+                }
+            }
+        }
+    }
+
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -40,6 +82,7 @@ fun LiquidGlassSheet(
             variant = LiquidGlassVariant.Regular,
             shape = LiquidGlassShapes.SheetInset,
             interactive = true,
+            optics = LiquidGlassOpticsTokens.Sheet,
             contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp)
         ) {
             Column(
