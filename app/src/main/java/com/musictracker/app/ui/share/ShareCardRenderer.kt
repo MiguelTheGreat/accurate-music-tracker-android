@@ -13,6 +13,7 @@ import android.graphics.Shader
 import android.graphics.Typeface
 import androidx.compose.ui.graphics.toArgb
 import androidx.palette.graphics.Palette
+import com.musictracker.app.domain.model.TopArtistStat
 import com.musictracker.app.domain.model.TopTrackStat
 import com.musictracker.app.ui.common.formatSkipRate
 import com.musictracker.app.ui.common.formatSummaryDuration
@@ -252,8 +253,14 @@ object ShareCardRenderer {
         ambient: AmbientColors,
         isStory: Boolean
     ) {
-        val artist = data.featuredArtist ?: data.topArtists.firstOrNull()
-        val artistName = artist?.artist ?: "No Artist Yet"
+        val featuredArtist = data.featuredArtist
+        if (featuredArtist == null) {
+            drawTopArtistsListContent(canvas, bounds, data, ambient, isStory)
+            return
+        }
+
+        val artist = featuredArtist
+        val artistName = artist.artist
         val centerX = bounds.centerX()
 
         drawEyebrow(canvas, "TOP ARTIST", centerX, bounds.top + 36f, ambient.accent, centered = true)
@@ -605,6 +612,114 @@ object ShareCardRenderer {
             subPaint
         )
         canvas.drawText(durationText, rect.right - 24f, rect.centerY() + 9f, durationPaint)
+    }
+
+    private fun drawTopArtistsListContent(
+        canvas: Canvas,
+        bounds: RectF,
+        data: ShareCardData,
+        ambient: AmbientColors,
+        isStory: Boolean
+    ) {
+        drawEyebrow(canvas, "TOP 5 ARTISTS", bounds.left, bounds.top + 36f, ambient.accent, centered = false)
+
+        val artists = data.topArtists.take(5)
+        if (artists.isEmpty()) {
+            drawEmptyMessage(canvas, bounds, "Keep listening to unlock your Top 5 Artists card")
+            return
+        }
+
+        val maxMs = artists.maxOf { it.totalListenedMs }.coerceAtLeast(1L)
+        val startY = bounds.top + 68f
+        val availableH = (bounds.bottom - startY).coerceAtLeast(400f)
+        val gap = if (isStory) 24f else 16f
+        val rowHeight = ((availableH - gap * (artists.size - 1)) / artists.size.coerceAtLeast(1))
+            .coerceIn(112f, if (isStory) 210f else 160f)
+
+        artists.forEachIndexed { idx, artist ->
+            val top = startY + idx * (rowHeight + gap)
+            val rowRect = RectF(bounds.left, top, bounds.right, top + rowHeight)
+            drawRankedArtistRow(
+                canvas = canvas,
+                rect = rowRect,
+                rank = idx + 1,
+                artist = artist,
+                ratio = (artist.totalListenedMs.toFloat() / maxMs.toFloat()).coerceIn(0.08f, 1f),
+                artwork = if (idx == 0) data.accentArtworks.getOrNull(0) ?: data.primaryArtwork else data.accentArtworks.getOrNull(idx),
+                accentColor = ambient.accent
+            )
+        }
+    }
+
+    private fun drawRankedArtistRow(
+        canvas: Canvas,
+        rect: RectF,
+        rank: Int,
+        artist: TopArtistStat,
+        ratio: Float,
+        artwork: Bitmap?,
+        accentColor: Int
+    ) {
+        drawGlassPill(canvas, rect, Color.argb(52, 255, 255, 255), cornerRadius = 28f)
+
+        val rankPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(180, 229, 234, 245)
+            textSize = 30f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        }
+        canvas.drawText("#$rank", rect.left + 22f, rect.centerY() + 6f, rankPaint)
+
+        val artSize = (rect.height() - 40f).coerceIn(64f, 108f)
+        val artRect = RectF(
+            rect.left + 84f,
+            rect.top + 16f,
+            rect.left + 84f + artSize,
+            rect.top + 16f + artSize
+        )
+        drawCircularArtwork(canvas, artRect, artwork, artist.artist)
+
+        val durationPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            textSize = 28f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+            textAlign = Paint.Align.RIGHT
+        }
+        val durationText = formatSummaryDuration(artist.totalListenedMs)
+        val durationW = durationPaint.measureText(durationText)
+
+        val textLeft = artRect.right + 22f
+        val maxTextW = (rect.right - 24f - durationW - 18f - textLeft).coerceAtLeast(100f)
+
+        val namePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            textSize = 32f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        }
+        val subPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(180, 229, 234, 245)
+            textSize = 24f
+        }
+        val playsLabel = if (artist.playCount == 1) "1 play" else "${artist.playCount} plays"
+        val tracksLabel = if (artist.uniqueTrackCount == 1) "1 track" else "${artist.uniqueTrackCount} tracks"
+
+        canvas.drawText(ellipsize(artist.artist, namePaint, maxTextW), textLeft, artRect.top + 38f, namePaint)
+        canvas.drawText(ellipsize("$playsLabel • $tracksLabel", subPaint, maxTextW), textLeft, artRect.top + 74f, subPaint)
+        canvas.drawText(durationText, rect.right - 24f, artRect.top + 48f, durationPaint)
+
+        // Proportional bar along bottom of row
+        val barTop = rect.bottom - 18f
+        val barRect = RectF(rect.left + 24f, barTop, rect.right - 24f, barTop + 7f)
+        val trackBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(45, 255, 255, 255) }
+        canvas.drawRoundRect(barRect, 4f, 4f, trackBgPaint)
+
+        val fillRect = RectF(
+            barRect.left,
+            barRect.top,
+            barRect.left + barRect.width() * ratio.coerceIn(0.06f, 1f),
+            barRect.bottom
+        )
+        val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = accentColor }
+        canvas.drawRoundRect(fillRect, 4f, 4f, fillPaint)
     }
 
     private fun drawRankedTrackRow(

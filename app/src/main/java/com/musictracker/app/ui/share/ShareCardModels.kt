@@ -7,7 +7,7 @@ import com.musictracker.app.domain.model.TopArtistStat
 import com.musictracker.app.domain.model.TopTrackStat
 
 enum class ShareCardMode(val label: String) {
-    TOP_ARTIST("Top Artist"),
+    TOP_ARTIST("Top Artists"),
     TOP_MUSIC("Top Music"),
     LISTENING_SUMMARY("Summary")
 }

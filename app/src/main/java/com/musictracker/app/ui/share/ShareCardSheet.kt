@@ -112,11 +112,11 @@ fun ShareCardSheet(
         }
     }
 
-    val effectiveArtist = remember(selectedMode, initialConfig, topArtists) {
+    val effectiveArtist = remember(selectedMode, initialConfig) {
         if (selectedMode == ShareCardMode.TOP_ARTIST) {
-            initialConfig.featuredArtist ?: topArtists.firstOrNull()
+            initialConfig.featuredArtist
         } else {
-            topArtists.firstOrNull()
+            null
         }
     }
 
@@ -144,14 +144,21 @@ fun ShareCardSheet(
         val bitmap = withContext(Dispatchers.Default) {
             val primaryArt = resolvePrimaryBitmap(
                 mode = selectedMode,
-                artist = effectiveArtist,
+                artist = effectiveArtist ?: topArtists.firstOrNull(),
                 track = effectiveTrack ?: effectiveTracks.firstOrNull(),
                 artworkResolver = artworkResolver
             )
-            val accentArt = resolveAccentBitmaps(
-                tracks = effectiveTracks.take(5),
-                artworkResolver = artworkResolver
-            )
+            val accentArt = if (selectedMode == ShareCardMode.TOP_ARTIST && effectiveArtist == null) {
+                resolveArtistAccentBitmaps(
+                    artists = topArtists.take(5),
+                    artworkResolver = artworkResolver
+                )
+            } else {
+                resolveAccentBitmaps(
+                    tracks = effectiveTracks.take(5),
+                    artworkResolver = artworkResolver
+                )
+            }
             ShareCardRenderer.render(
                 ShareCardData(
                     mode = selectedMode,
@@ -513,6 +520,14 @@ private suspend fun resolveAccentBitmaps(
     val resolved = runCatching { artworkResolver("${track.artist}::${track.title}", false) }.getOrNull()
     val file = resolved ?: track.artworkUri?.let(::localFileFromUri)
     file?.let(::decodeFileSafely)
+}
+
+private suspend fun resolveArtistAccentBitmaps(
+    artists: List<TopArtistStat>,
+    artworkResolver: suspend (key: String, isArtist: Boolean) -> File?
+): List<Bitmap?> = artists.map { artist ->
+    val resolved = runCatching { artworkResolver(artist.artist, true) }.getOrNull()
+    resolved?.let(::decodeFileSafely)
 }
 
 private fun localFileFromUri(uri: String): File? {
