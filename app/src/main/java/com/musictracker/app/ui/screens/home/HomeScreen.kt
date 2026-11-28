@@ -114,6 +114,8 @@ fun HomeRoute(
             systemPermissionHelper.openNotificationListenerSettings(context)
         },
         onDismissPermissionBanner = viewModel::dismissPermissionBanner,
+        onTrackSuggestedPlayer = viewModel::trackSuggestedPlayer,
+        onDismissSuggestedPlayer = viewModel::dismissSuggestedPlayer,
         onUnlockFullHistory = viewModel::unlockFullHistory,
         onCollapseHistory = viewModel::collapseHistory,
         modifier = modifier
@@ -126,6 +128,8 @@ fun HomeScreenContent(
     clock: TrackerClock,
     onEnableNotificationAccess: () -> Unit,
     onDismissPermissionBanner: () -> Unit,
+    onTrackSuggestedPlayer: (String) -> Unit = {},
+    onDismissSuggestedPlayer: (String) -> Unit = {},
     onUnlockFullHistory: () -> Unit = {},
     onCollapseHistory: () -> Unit = {},
     modifier: Modifier = Modifier
@@ -211,6 +215,25 @@ fun HomeScreenContent(
                     actionTestTag = TestTags.HOME_PERMISSION_ENABLE_BTN,
                     dismissContentDescription = "Dismiss notification access banner",
                     modifier = Modifier.testTag(TestTags.HOME_PERMISSION_BANNER)
+                )
+            }
+        }
+
+        uiState.suggestedPlayer?.let { suggested ->
+            item(key = "home_suggested_player_banner") {
+                LiquidGlassBanner(
+                    title = "${formatSourceAppName(suggested.packageName)} is playing. Track it?",
+                    subtitle = if (suggested.artist.isNotBlank()) {
+                        "${suggested.trackTitle} • ${suggested.artist}"
+                    } else {
+                        suggested.trackTitle
+                    },
+                    actionLabel = "Track",
+                    onActionClick = { onTrackSuggestedPlayer(suggested.packageName) },
+                    onDismiss = { onDismissSuggestedPlayer(suggested.packageName) },
+                    actionTestTag = TestTags.HOME_SUGGESTED_PLAYER_TRACK_BTN,
+                    dismissContentDescription = "Dismiss suggested player banner",
+                    modifier = Modifier.testTag(TestTags.HOME_SUGGESTED_PLAYER_BANNER)
                 )
             }
         }

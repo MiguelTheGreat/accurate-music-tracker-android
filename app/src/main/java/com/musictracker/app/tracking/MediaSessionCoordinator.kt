@@ -17,6 +17,7 @@ import com.musictracker.app.domain.model.NowTrackingState
 import com.musictracker.app.domain.model.PlaybackEvent
 import com.musictracker.app.domain.model.PlaybackStateSnapshot
 import com.musictracker.app.domain.model.PlaybackStatus
+import com.musictracker.app.domain.model.SuggestedPlayer
 import com.musictracker.app.domain.normalization.AdAndPlaceholderFilter
 import com.musictracker.app.domain.normalization.MetadataNormalizer
 import com.musictracker.app.domain.normalization.MusicMetadataNormalizer
@@ -32,6 +33,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -228,6 +230,9 @@ class MediaSessionCoordinator(
     private val _isListenerConnected = MutableStateFlow(false)
     val isListenerConnected: StateFlow<Boolean> = _isListenerConnected.asStateFlow()
 
+    private val _suggestedPlayer = MutableStateFlow<SuggestedPlayer?>(null)
+    val suggestedPlayer: StateFlow<SuggestedPlayer?> = _suggestedPlayer.asStateFlow()
+
     val nowTracking: StateFlow<NowTrackingState?>
         get() = playSessionEngine.nowTracking
 
@@ -236,6 +241,7 @@ class MediaSessionCoordinator(
 
     private var lastKnownControllers: List<TrackedMediaController> = emptyList()
     private var allowedPackages: Set<String> = DefaultAllowlist.packages
+    private var dismissedSuggestionPackages: Set<String> = emptySet()
     private val attachedControllers = LinkedHashMap<Any, AttachedEntry>()
     private var focusedTokenId: Any? = null
     private var lastWidgetTrackingSignature: WidgetTrackingSignature =
@@ -254,9 +260,15 @@ class MediaSessionCoordinator(
         synchronized(stateLock) {
             if (allowlistJob?.isActive == true) return
             allowlistJob = scope.launch(schedulerDispatcher) {
-                allowlistRepository.allowedPackages.collect { updatedAllowlist ->
+                combine(
+                    allowlistRepository.allowedPackages,
+                    allowlistRepository.dismissedSuggestionPackages
+                ) { updatedAllowlist, updatedDismissed ->
+                    updatedAllowlist to updatedDismissed
+                }.collect { (updatedAllowlist, updatedDismissed) ->
                     val emitted = synchronized(stateLock) {
                         allowedPackages = updatedAllowlist
+                        dismissedSuggestionPackages = updatedDismissed
                         reconcileSessionsLocked(lastKnownControllers)
                     }
                     persistSessionsAsync(emitted)
@@ -340,6 +352,7 @@ class MediaSessionCoordinator(
             attachedControllers.clear()
             lastKnownControllers = emptyList()
             focusedTokenId = null
+            _suggestedPlayer.value = null
 
             val flushed = playSessionEngine.flushActiveSession()
             notifyWidgetIfTrackingChangedLocked()
@@ -359,9 +372,31 @@ class MediaSessionCoordinator(
         packageName in allowedPackages
     }
 
+    private fun updateSuggestedPlayerLocked(controllers: List<TrackedMediaController>) {
+        _suggestedPlayer.value = controllers.firstNotNullOfOrNull { controller ->
+            val pkg = controller.packageName
+            if (pkg.isBlank() || pkg in allowedPackages || pkg in dismissedSuggestionPackages) {
+                return@firstNotNullOfOrNull null
+            }
+            if (controller.currentPlaybackState?.status != PlaybackStatus.PLAYING) {
+                return@firstNotNullOfOrNull null
+            }
+            val meta = controller.currentMetadata ?: return@firstNotNullOfOrNull null
+            if (meta.title.isBlank() || AdAndPlaceholderFilter.isAdOrPlaceholder(meta)) {
+                return@firstNotNullOfOrNull null
+            }
+            SuggestedPlayer(
+                packageName = pkg,
+                trackTitle = meta.title,
+                artist = meta.artist
+            )
+        }
+    }
+
     private fun reconcileSessionsLocked(
         controllers: List<TrackedMediaController>
     ): List<CompletedListenSession> {
+        updateSuggestedPlayerLocked(controllers)
         val eligible = controllers.filter { it.packageName in allowedPackages }
         if (eligible.isEmpty() && attachedControllers.isEmpty() && focusedTokenId == null) {
             return emptyList()

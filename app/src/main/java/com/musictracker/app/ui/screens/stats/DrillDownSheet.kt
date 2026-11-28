@@ -39,6 +39,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.musictracker.app.domain.model.ArtistDetailStats
+import com.musictracker.app.domain.model.DiscoveryTag
 import com.musictracker.app.domain.model.StatsTimeframe
 import com.musictracker.app.domain.model.TopArtistStat
 import com.musictracker.app.domain.model.TopTrackStat
@@ -78,7 +79,9 @@ fun DrillDownSheet(
     onShareArtist: (TopArtistStat, List<TopTrackStat>) -> Unit,
     onDismiss: () -> Unit,
     artistArtworkPaths: Map<String, String> = emptyMap(),
-    trackArtworkPaths: Map<Long, String> = emptyMap()
+    trackArtworkPaths: Map<Long, String> = emptyMap(),
+    firstListenEpoch: Long? = null,
+    discoveryTag: DiscoveryTag? = null
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -106,6 +109,8 @@ fun DrillDownSheet(
                         detail = trackDetail,
                         resolvedArtworkPath = trackArtworkPaths[target.track.trackId],
                         timeframe = timeframe,
+                        firstListenEpoch = firstListenEpoch,
+                        discoveryTag = discoveryTag,
                         onShare = { onShareTrack(target.track) },
                         onDismiss = onDismiss
                     )
@@ -118,6 +123,8 @@ fun DrillDownSheet(
                             ?: artistArtworkPaths[target.artist.artist],
                         trackArtworkPaths = trackArtworkPaths,
                         timeframe = timeframe,
+                        firstListenEpoch = firstListenEpoch,
+                        discoveryTag = discoveryTag,
                         onShare = { onShareArtist(target.artist, artistTopTracks) },
                         onDismiss = onDismiss
                     )
@@ -133,6 +140,8 @@ private fun TrackDrillDownBody(
     detail: TrackDetailStats?,
     resolvedArtworkPath: String?,
     timeframe: StatsTimeframe,
+    firstListenEpoch: Long?,
+    discoveryTag: DiscoveryTag?,
     onShare: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -195,7 +204,15 @@ private fun TrackDrillDownBody(
         }
     }
 
-    TimeframeCaptionPill(timeframe = timeframe)
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        TimeframeCaptionPill(timeframe = timeframe)
+        if (discoveryTag != null) {
+            DiscoveryTagPill(tag = discoveryTag)
+        }
+    }
 
     // 2x2 stats grid
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -233,7 +250,7 @@ private fun TrackDrillDownBody(
     }
 
     HeardDatesRow(
-        firstHeardEpoch = detail?.firstHeardEpoch,
+        firstHeardEpoch = firstListenEpoch ?: detail?.firstHeardEpoch,
         lastHeardEpoch = detail?.lastHeardEpoch
     )
 
@@ -263,6 +280,8 @@ private fun ArtistDrillDownBody(
     resolvedArtistArtworkPath: String?,
     trackArtworkPaths: Map<Long, String>,
     timeframe: StatsTimeframe,
+    firstListenEpoch: Long?,
+    discoveryTag: DiscoveryTag?,
     onShare: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -310,7 +329,15 @@ private fun ArtistDrillDownBody(
         }
     }
 
-    TimeframeCaptionPill(timeframe = timeframe)
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        TimeframeCaptionPill(timeframe = timeframe)
+        if (discoveryTag != null) {
+            DiscoveryTagPill(tag = discoveryTag)
+        }
+    }
 
     // 2x2 stats grid
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -347,7 +374,7 @@ private fun ArtistDrillDownBody(
     }
 
     HeardDatesRow(
-        firstHeardEpoch = detail?.firstHeardEpoch,
+        firstHeardEpoch = firstListenEpoch ?: detail?.firstHeardEpoch,
         lastHeardEpoch = detail?.lastHeardEpoch
     )
 
@@ -464,6 +491,30 @@ private fun TimeframeCaptionPill(timeframe: StatsTimeframe) {
 }
 
 @Composable
+private fun DiscoveryTagPill(tag: DiscoveryTag) {
+    val colors = LiquidGlassTheme.colors
+    val accent = when (tag) {
+        DiscoveryTag.OBSESSION -> colors.accentAmber
+        DiscoveryTag.LOYALIST -> colors.accentBlue
+        DiscoveryTag.NEW_DISCOVERY -> colors.accentGreen
+        DiscoveryTag.REDISCOVERED -> colors.accentBlue
+    }
+    Box(
+        modifier = Modifier
+            .clip(LiquidGlassShapes.Capsule)
+            .background(accent.copy(alpha = 0.16f))
+            .border(1.dp, accent.copy(alpha = 0.35f), LiquidGlassShapes.Capsule)
+            .padding(horizontal = 10.dp, vertical = 5.dp)
+    ) {
+        Text(
+            text = tag.label,
+            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+            color = accent
+        )
+    }
+}
+
+@Composable
 private fun DrillDownMetricTile(
     label: String,
     value: String,
@@ -514,7 +565,7 @@ private fun HeardDatesRow(
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
-                text = "First Heard",
+                text = "First Discovered",
                 style = MaterialTheme.typography.labelSmall,
                 color = colors.labelTertiary
             )

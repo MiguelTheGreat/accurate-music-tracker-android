@@ -1,7 +1,10 @@
 package com.musictracker.app.domain
 
+import com.musictracker.app.domain.model.DiscoveryTag
 import com.musictracker.app.domain.model.ListenEventInsightSample
+import com.musictracker.app.domain.model.ListeningSummary
 import com.musictracker.app.domain.model.MilestoneType
+import com.musictracker.app.domain.model.RankDelta
 import com.musictracker.app.domain.stats.ListeningInsightsCalculator
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -189,6 +192,148 @@ class ListeningInsightsCalculatorTest {
         assertNull(rhythm.peakHour)
         assertEquals(0L, rhythm.peakListenedMs)
         assertFalse(rhythm.hasData)
+    }
+
+    @Test
+    fun computeSummaryDelta_positiveNegativeZeroAndNullPrevious() {
+        // Null previous -> null
+        val current = ListeningSummary(
+            totalListenedMs = 300_000L,
+            playCount = 20,
+            skippedCount = 4,
+            skipRate = 0.20f
+        )
+        assertNull(ListeningInsightsCalculator.computeSummaryDelta(current, null))
+
+        // Positive deltas
+        val prevLower = ListeningSummary(
+            totalListenedMs = 200_000L,
+            playCount = 10,
+            skippedCount = 1,
+            skipRate = 0.10f
+        )
+        val positive = ListeningInsightsCalculator.computeSummaryDelta(current, prevLower)!!
+        assertEquals(50, positive.listenedMsPercentChange)
+        assertEquals(100, positive.playCountPercentChange)
+        assertEquals(10, positive.skipRatePointChange)
+
+        // Negative deltas
+        val prevHigher = ListeningSummary(
+            totalListenedMs = 600_000L,
+            playCount = 40,
+            skippedCount = 14,
+            skipRate = 0.35f
+        )
+        val negative = ListeningInsightsCalculator.computeSummaryDelta(current, prevHigher)!!
+        assertEquals(-50, negative.listenedMsPercentChange)
+        assertEquals(-50, negative.playCountPercentChange)
+        assertEquals(-15, negative.skipRatePointChange)
+
+        // Zero previous -> null fields (no division by zero)
+        val prevZero = ListeningSummary(
+            totalListenedMs = 0L,
+            playCount = 0,
+            skippedCount = 0,
+            skipRate = 0f
+        )
+        val zeroDelta = ListeningInsightsCalculator.computeSummaryDelta(current, prevZero)!!
+        assertNull(zeroDelta.listenedMsPercentChange)
+        assertNull(zeroDelta.playCountPercentChange)
+        assertNull(zeroDelta.skipRatePointChange)
+    }
+
+    @Test
+    fun computeRankDeltas_upDownSameNewAndEmptyPrevious() {
+        val current = listOf("A", "B", "C", "D")
+        val previous = listOf("B", "C", "A", "E")
+
+        val deltas = ListeningInsightsCalculator.computeRankDeltas(current, previous)
+        assertEquals(RankDelta.Up(2), deltas["A"])
+        assertEquals(RankDelta.Down(1), deltas["B"])
+        assertEquals(RankDelta.Down(1), deltas["C"])
+        assertEquals(RankDelta.New, deltas["D"])
+
+        val sameDeltas = ListeningInsightsCalculator.computeRankDeltas(listOf("A"), listOf("A"))
+        assertEquals(RankDelta.Same, sameDeltas["A"])
+
+        assertEquals(emptyMap<String, RankDelta>(), ListeningInsightsCalculator.computeRankDeltas(current, emptyList()))
+        assertEquals(emptyMap<String, RankDelta>(), ListeningInsightsCalculator.computeRankDeltas(current, null))
+    }
+
+    @Test
+    fun computeDiscoveryTag_obsessionLoyalistNewFindAndNull() {
+        val nowMs = 1_750_000_000_000L
+        val dayMs = 86_400_000L
+
+        // Obsession (track >= 5 in 7d; artist >= 10 in 7d)
+        assertEquals(
+            DiscoveryTag.OBSESSION,
+            ListeningInsightsCalculator.computeDiscoveryTag(
+                firstHeardAllTimeEpoch = nowMs - 20L * dayMs,
+                recentPlayCount7d = 5,
+                totalAllTimePlays = 5,
+                nowEpochMs = nowMs,
+                isArtist = false
+            )
+        )
+        assertEquals(
+            DiscoveryTag.OBSESSION,
+            ListeningInsightsCalculator.computeDiscoveryTag(
+                firstHeardAllTimeEpoch = nowMs - 20L * dayMs,
+                recentPlayCount7d = 10,
+                totalAllTimePlays = 10,
+                nowEpochMs = nowMs,
+                isArtist = true
+            )
+        )
+
+        // New Find (first heard <= 7 days ago, below obsession threshold)
+        assertEquals(
+            DiscoveryTag.NEW_DISCOVERY,
+            ListeningInsightsCalculator.computeDiscoveryTag(
+                firstHeardAllTimeEpoch = nowMs - 3L * dayMs,
+                recentPlayCount7d = 2,
+                totalAllTimePlays = 2,
+                nowEpochMs = nowMs
+            )
+        )
+
+        // Loyalist (first heard >= 30 days ago and totalAllTimePlays >= 5)
+        assertEquals(
+            DiscoveryTag.LOYALIST,
+            ListeningInsightsCalculator.computeDiscoveryTag(
+                firstHeardAllTimeEpoch = nowMs - 45L * dayMs,
+                recentPlayCount7d = 1,
+                totalAllTimePlays = 12,
+                nowEpochMs = nowMs
+            )
+        )
+
+        // Null cases: mid-age (15 days), old with < 5 plays, or null firstHeard
+        assertNull(
+            ListeningInsightsCalculator.computeDiscoveryTag(
+                firstHeardAllTimeEpoch = nowMs - 15L * dayMs,
+                recentPlayCount7d = 2,
+                totalAllTimePlays = 3,
+                nowEpochMs = nowMs
+            )
+        )
+        assertNull(
+            ListeningInsightsCalculator.computeDiscoveryTag(
+                firstHeardAllTimeEpoch = nowMs - 45L * dayMs,
+                recentPlayCount7d = 1,
+                totalAllTimePlays = 4,
+                nowEpochMs = nowMs
+            )
+        )
+        assertNull(
+            ListeningInsightsCalculator.computeDiscoveryTag(
+                firstHeardAllTimeEpoch = null,
+                recentPlayCount7d = 10,
+                totalAllTimePlays = 10,
+                nowEpochMs = nowMs
+            )
+        )
     }
 
     private fun eventOn(

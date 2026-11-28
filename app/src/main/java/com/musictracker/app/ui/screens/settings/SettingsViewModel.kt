@@ -4,6 +4,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.musictracker.app.data.export.DataExporter
+import com.musictracker.app.data.importer.DataImporter
+import com.musictracker.app.data.importer.ImportFormat
+import com.musictracker.app.data.importer.ImportResult
 import com.musictracker.app.data.preferences.AccessibilityPreferencesStore
 import com.musictracker.app.data.preferences.AllowlistRepository
 import com.musictracker.app.data.preferences.ArtworkPreferencesStore
@@ -27,6 +30,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.InputStream
 import java.io.OutputStream
 
 class SettingsViewModel(
@@ -41,7 +45,8 @@ class SettingsViewModel(
     private val runLibraryCleanup: suspend () -> LibraryCleanupResult = { LibraryCleanupResult() },
     private val themeModeFlow: Flow<ThemeMode> = flowOf(ThemeMode.SYSTEM),
     private val setThemeMode: suspend (ThemeMode) -> Unit = {},
-    private val onLibraryCleaned: () -> Unit = {}
+    private val onLibraryCleaned: () -> Unit = {},
+    private val dataImporter: DataImporter? = null
 ) : ViewModel() {
 
     constructor(
@@ -53,7 +58,8 @@ class SettingsViewModel(
         artworkPreferencesStore: ArtworkPreferencesStore? = null,
         listeningRepository: ListeningRepository? = null,
         themePreferencesStore: ThemePreferencesStore? = null,
-        onLibraryCleaned: () -> Unit = {}
+        onLibraryCleaned: () -> Unit = {},
+        dataImporter: DataImporter? = null
     ) : this(
         systemPermissionHelper = systemPermissionHelper,
         allowlistRepository = allowlistRepository,
@@ -74,7 +80,8 @@ class SettingsViewModel(
         setThemeMode = { mode ->
             themePreferencesStore?.setThemeMode(mode)
         },
-        onLibraryCleaned = onLibraryCleaned
+        onLibraryCleaned = onLibraryCleaned,
+        dataImporter = dataImporter
     )
 
     private val isNotificationAccessGrantedFlow = MutableStateFlow(
@@ -87,6 +94,7 @@ class SettingsViewModel(
     private val installedAppsFlow = MutableStateFlow<List<InstalledAppInfo>>(emptyList())
     private val isLoadingAppsFlow = MutableStateFlow(true)
     private val exportStateFlow = MutableStateFlow<ExportUiState>(ExportUiState.Idle)
+    private val importStateFlow = MutableStateFlow<ImportUiState>(ImportUiState.Idle)
     private val isCleaningLibraryFlow = MutableStateFlow(false)
     private val libraryCleanupFeedbackFlow = MutableStateFlow<String?>(null)
 
@@ -156,20 +164,28 @@ class SettingsViewModel(
         )
     }
 
+    private val dataTransferFlow = combine(
+        exportStateFlow,
+        importStateFlow
+    ) { exportState, importState ->
+        exportState to importState
+    }
+
     val uiState: StateFlow<SettingsUiState> = combine(
         systemStatusFlow,
         filteredAppsFlow,
         isLoadingAppsFlow,
-        exportStateFlow,
+        dataTransferFlow,
         preferenceTogglesFlow
-    ) { status, filteredApps, isLoadingApps, exportState, toggles ->
+    ) { status, filteredApps, isLoadingApps, transfer, toggles ->
         SettingsUiState(
             isNotificationAccessGranted = status.hasNotifAccess,
             isIgnoringBatteryOptimizations = status.isIgnoringBattery,
             searchQuery = status.searchQuery,
             filteredApps = filteredApps,
             isLoadingApps = isLoadingApps,
-            exportState = exportState,
+            exportState = transfer.first,
+            importState = transfer.second,
             reduceTransparencyEnabled = toggles.reduceTransparency,
             onlineArtworkEnabled = toggles.onlineArtworkEnabled,
             isCleaningLibrary = toggles.isCleaningLibrary,
@@ -345,6 +361,82 @@ class SettingsViewModel(
         }
     }
 
+    fun importData(format: ImportFormat, openInputStream: () -> InputStream?) {
+        val importer = dataImporter
+        if (importer == null) {
+            importStateFlow.value = ImportUiState.Error(
+                format = format,
+                message = "Data importer is unavailable"
+            )
+            return
+        }
+        if (importStateFlow.value is ImportUiState.InProgress) return
+        importStateFlow.value = ImportUiState.InProgress(format)
+
+        viewModelScope.launch {
+            val result = withContext(ioDispatcher) {
+                runCatching {
+                    val stream = openInputStream()
+                        ?: return@runCatching ImportResult.Error("Unable to open selected file")
+                    stream.use { inputStream ->
+                        importer.import(format, inputStream)
+                    }
+                }.getOrElse { throwable ->
+                    if (throwable is CancellationException) throw throwable
+                    ImportResult.Error(
+                        message = throwable.message ?: "Import failed unexpectedly",
+                        cause = throwable
+                    )
+                }
+            }
+
+            importStateFlow.value = when (result) {
+                is ImportResult.Success -> {
+                    if (result.importedEvents > 0) {
+                        onLibraryCleaned()
+                    }
+                    val label = when (format) {
+                        ImportFormat.COLLECTO_JSON -> "Collecto restore"
+                        ImportFormat.LASTFM_CSV -> "Last.fm CSV import"
+                        ImportFormat.LASTFM_JSON -> "Last.fm JSON import"
+                        ImportFormat.SPOTIFY_EXTENDED_JSON -> "Spotify history import"
+                    }
+                    val details = buildList {
+                        add("${result.importedEvents} listens")
+                        if (result.importedTracks > 0) {
+                            add("${result.importedTracks} new tracks")
+                        }
+                        if (result.skippedDuplicates > 0) {
+                            add("${result.skippedDuplicates} duplicates skipped")
+                        }
+                    }.joinToString(", ")
+                    ImportUiState.Success(
+                        format = format,
+                        message = "$label complete ($details)"
+                    )
+                }
+
+                is ImportResult.Error -> ImportUiState.Error(
+                    format = format,
+                    message = result.message
+                )
+            }
+        }
+    }
+
+    fun clearImportFeedback() {
+        if (importStateFlow.value !is ImportUiState.InProgress) {
+            importStateFlow.value = ImportUiState.Idle
+        }
+    }
+
+    fun reportImportError(format: ImportFormat, message: String) {
+        importStateFlow.value = ImportUiState.Error(
+            format = format,
+            message = message
+        )
+    }
+
     companion object {
         fun factory(appContainer: AppContainer): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
@@ -359,7 +451,8 @@ class SettingsViewModel(
                         artworkPreferencesStore = appContainer.artworkPreferencesStore,
                         listeningRepository = appContainer.listeningRepository,
                         themePreferencesStore = appContainer.themePreferencesStore,
-                        onLibraryCleaned = { appContainer.widgetUpdater.requestUpdate() }
+                        onLibraryCleaned = { appContainer.widgetUpdater.requestUpdate() },
+                        dataImporter = appContainer.dataImporter
                     ) as T
                 }
             }

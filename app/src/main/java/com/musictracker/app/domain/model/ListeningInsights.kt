@@ -163,3 +163,34 @@ data class ListeningInsights(
     val milestones: List<CollectorMilestone> = emptyList(),
     val rhythm: ListeningRhythm = ListeningRhythm.empty()
 )
+
+/**
+ * Period-over-period delta for the Stats summary strip.
+ * Null fields indicate no valid comparison baseline (e.g., previous period was 0 or ALL_TIME).
+ */
+data class SummaryDelta(
+    val listenedMsPercentChange: Int? = null,
+    val playCountPercentChange: Int? = null,
+    val skipRatePointChange: Int? = null
+)
+
+/**
+ * Period-over-period rank movement for a track or artist in the Top 5 list.
+ */
+sealed interface RankDelta {
+    data class Up(val places: Int) : RankDelta
+    data class Down(val places: Int) : RankDelta
+    data object Same : RankDelta
+    data object New : RankDelta
+}
+
+/**
+ * Discovery classification tag shown in the Track / Artist drill-down sheet.
+ */
+enum class DiscoveryTag(val label: String) {
+    OBSESSION("Obsession"),
+    LOYALIST("Loyalist"),
+    NEW_DISCOVERY("New Find"),
+    REDISCOVERED("Rediscovered")
+}
+

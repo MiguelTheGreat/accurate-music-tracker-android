@@ -1,16 +1,21 @@
 package com.musictracker.app.domain.stats
 
 import com.musictracker.app.domain.model.CollectorMilestone
+import com.musictracker.app.domain.model.DiscoveryTag
 import com.musictracker.app.domain.model.HourlyListeningBucket
 import com.musictracker.app.domain.model.ListenEventInsightSample
 import com.musictracker.app.domain.model.ListeningInsights
 import com.musictracker.app.domain.model.ListeningRhythm
 import com.musictracker.app.domain.model.ListeningStreak
+import com.musictracker.app.domain.model.ListeningSummary
 import com.musictracker.app.domain.model.MilestoneType
+import com.musictracker.app.domain.model.RankDelta
+import com.musictracker.app.domain.model.SummaryDelta
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.temporal.ChronoUnit
+import kotlin.math.roundToInt
 
 /**
  * Pure-Kotlin calculator for timezone-safe daily listening streaks, unlockable collector
@@ -204,6 +209,105 @@ object ListeningInsightsCalculator {
             peakHour = peakHour,
             peakListenedMs = peakMs
         )
+    }
+
+    /**
+     * Computes period-over-period percentage / point deltas between [current] and [previous].
+     * Returns `null` when [previous] is `null` (e.g. ALL_TIME).
+     * Individual delta fields are `null` when the previous baseline is 0 (no division by zero).
+     */
+    fun computeSummaryDelta(
+        current: ListeningSummary,
+        previous: ListeningSummary?
+    ): SummaryDelta? {
+        if (previous == null) return null
+
+        val listenedMsPercentChange = if (previous.totalListenedMs <= 0L) {
+            null
+        } else {
+            val diff = (current.totalListenedMs - previous.totalListenedMs).toDouble()
+            ((diff / previous.totalListenedMs.toDouble()) * 100.0).roundToInt()
+        }
+
+        val playCountPercentChange = if (previous.playCount <= 0) {
+            null
+        } else {
+            val diff = (current.playCount - previous.playCount).toDouble()
+            ((diff / previous.playCount.toDouble()) * 100.0).roundToInt()
+        }
+
+        val skipRatePointChange = if (previous.playCount <= 0 || current.playCount <= 0) {
+            null
+        } else {
+            val currPct = current.skipRate.coerceIn(0f, 1f) * 100f
+            val prevPct = previous.skipRate.coerceIn(0f, 1f) * 100f
+            (currPct - prevPct).roundToInt()
+        }
+
+        return SummaryDelta(
+            listenedMsPercentChange = listenedMsPercentChange,
+            playCountPercentChange = playCountPercentChange,
+            skipRatePointChange = skipRatePointChange
+        )
+    }
+
+    /**
+     * Computes rank movement for each key in [currentKeys] relative to [previousKeys].
+     * Returns an empty map when [previousKeys] is `null` or empty (e.g. ALL_TIME or no prior-period data)
+     * so items are not spuriously tagged as [RankDelta.New].
+     */
+    fun <K> computeRankDeltas(
+        currentKeys: List<K>,
+        previousKeys: List<K>?
+    ): Map<K, RankDelta> {
+        if (currentKeys.isEmpty() || previousKeys.isNullOrEmpty()) {
+            return emptyMap()
+        }
+
+        val prevIndexByKey = HashMap<K, Int>(previousKeys.size)
+        previousKeys.forEachIndexed { index, key ->
+            prevIndexByKey.putIfAbsent(key, index)
+        }
+
+        val result = LinkedHashMap<K, RankDelta>(currentKeys.size)
+        currentKeys.forEachIndexed { currentIndex, key ->
+            val prevIndex = prevIndexByKey[key]
+            result[key] = when {
+                prevIndex == null -> RankDelta.New
+                prevIndex > currentIndex -> RankDelta.Up(prevIndex - currentIndex)
+                prevIndex < currentIndex -> RankDelta.Down(currentIndex - prevIndex)
+                else -> RankDelta.Same
+            }
+        }
+        return result
+    }
+
+    /**
+     * Classifies a track or artist with a [DiscoveryTag] based on all-time first-listen epoch,
+     * recent 7-day play count, and total all-time plays.
+     */
+    fun computeDiscoveryTag(
+        firstHeardAllTimeEpoch: Long?,
+        recentPlayCount7d: Int,
+        totalAllTimePlays: Int,
+        nowEpochMs: Long,
+        isArtist: Boolean = false
+    ): DiscoveryTag? {
+        if (firstHeardAllTimeEpoch == null || firstHeardAllTimeEpoch <= 0L) {
+            return null
+        }
+
+        val ageMs = (nowEpochMs - firstHeardAllTimeEpoch).coerceAtLeast(0L)
+        val sevenDaysMs = 7L * 86_400_000L
+        val thirtyDaysMs = 30L * 86_400_000L
+        val obsessionThreshold = if (isArtist) 10 else 5
+
+        return when {
+            recentPlayCount7d >= obsessionThreshold -> DiscoveryTag.OBSESSION
+            ageMs <= sevenDaysMs -> DiscoveryTag.NEW_DISCOVERY
+            ageMs >= thirtyDaysMs && totalAllTimePlays >= 5 -> DiscoveryTag.LOYALIST
+            else -> null
+        }
     }
 
     private fun countConsecutiveBackward(startDate: LocalDate, activeDates: Set<LocalDate>): Int {

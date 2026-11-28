@@ -1,6 +1,7 @@
 package com.musictracker.app.ui.screens.settings
 
 import androidx.compose.runtime.Immutable
+import com.musictracker.app.data.importer.ImportFormat
 import com.musictracker.app.data.preferences.ThemeMode
 
 @Immutable
@@ -25,6 +26,14 @@ sealed interface ExportUiState {
 }
 
 @Immutable
+sealed interface ImportUiState {
+    data object Idle : ImportUiState
+    data class InProgress(val format: ImportFormat) : ImportUiState
+    data class Success(val format: ImportFormat, val message: String) : ImportUiState
+    data class Error(val format: ImportFormat, val message: String) : ImportUiState
+}
+
+@Immutable
 data class SettingsUiState(
     val isNotificationAccessGranted: Boolean = false,
     val isIgnoringBatteryOptimizations: Boolean = false,
@@ -32,6 +41,7 @@ data class SettingsUiState(
     val filteredApps: List<AllowlistAppItem> = emptyList(),
     val isLoadingApps: Boolean = true,
     val exportState: ExportUiState = ExportUiState.Idle,
+    val importState: ImportUiState = ImportUiState.Idle,
     val reduceTransparencyEnabled: Boolean = false,
     val onlineArtworkEnabled: Boolean = true,
     val isCleaningLibrary: Boolean = false,
@@ -40,4 +50,7 @@ data class SettingsUiState(
 ) {
     val isExporting: Boolean
         get() = exportState is ExportUiState.InProgress
+
+    val isImporting: Boolean
+        get() = importState is ImportUiState.InProgress
 }

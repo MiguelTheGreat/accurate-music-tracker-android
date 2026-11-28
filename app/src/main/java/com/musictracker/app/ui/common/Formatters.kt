@@ -119,6 +119,39 @@ fun computeTimeframeSinceEpochMs(
     StatsTimeframe.ALL_TIME -> 0L
 }
 
+/**
+ * Computes the previous comparison window `[prevStartMs, prevEndMs)` for [timeframe],
+ * or `null` for [StatsTimeframe.ALL_TIME].
+ */
+fun computePreviousPeriodWindow(
+    timeframe: StatsTimeframe,
+    nowEpochMs: Long,
+    zoneId: ZoneId = ZoneId.systemDefault()
+): Pair<Long, Long>? = when (timeframe) {
+    StatsTimeframe.TODAY -> {
+        val todayStart = startOfTodayEpochMs(nowEpochMs, zoneId)
+        val yesterdayStart = Instant.ofEpochMilli(todayStart)
+            .atZone(zoneId)
+            .toLocalDate()
+            .minusDays(1)
+            .atStartOfDay(zoneId)
+            .toInstant()
+            .toEpochMilli()
+        yesterdayStart to todayStart
+    }
+    StatsTimeframe.SEVEN_DAYS -> {
+        val currStart = (nowEpochMs - 7L * MILLIS_PER_DAY).coerceAtLeast(0L)
+        val prevStart = (currStart - 7L * MILLIS_PER_DAY).coerceAtLeast(0L)
+        prevStart to currStart
+    }
+    StatsTimeframe.THIRTY_DAYS -> {
+        val currStart = (nowEpochMs - 30L * MILLIS_PER_DAY).coerceAtLeast(0L)
+        val prevStart = (currStart - 30L * MILLIS_PER_DAY).coerceAtLeast(0L)
+        prevStart to currStart
+    }
+    StatsTimeframe.ALL_TIME -> null
+}
+
 private val KnownMusicAppNames = mapOf(
     "com.google.android.apps.youtube.music" to "YouTube Music",
     "com.spotify.music" to "Spotify",

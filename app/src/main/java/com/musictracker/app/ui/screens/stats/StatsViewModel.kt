@@ -8,12 +8,14 @@ import com.musictracker.app.data.repository.ListeningRepository
 import com.musictracker.app.di.AppContainer
 import com.musictracker.app.domain.clock.TrackerClock
 import com.musictracker.app.domain.model.ArtistDetailStats
+import com.musictracker.app.domain.model.ListeningSummary
 import com.musictracker.app.domain.model.StatsTimeframe
 import com.musictracker.app.domain.model.TopArtistStat
 import com.musictracker.app.domain.model.TopTrackStat
 import com.musictracker.app.domain.model.TrackDetailStats
 import com.musictracker.app.domain.normalization.MusicMetadataNormalizer
 import com.musictracker.app.domain.stats.ListeningInsightsCalculator
+import com.musictracker.app.ui.common.computePreviousPeriodWindow
 import com.musictracker.app.ui.common.computeTimeframeSinceEpochMs
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -111,30 +113,133 @@ class StatsViewModel(
     private val artworkRevisionFlow: Flow<Int> =
         artworkRepository?.artworkRevision ?: flowOf(0)
 
+    private data class PreviousPeriodData(
+        val summary: ListeningSummary? = null,
+        val topTracks: List<TopTrackStat> = emptyList(),
+        val topArtists: List<TopArtistStat> = emptyList()
+    )
+
     private val baseUiStateFlow: Flow<StatsUiState> = timeframeWindowFlow.flatMapLatest { window ->
-        combine(
+        val prevWindow = computePreviousPeriodWindow(
+            timeframe = window.timeframe,
+            nowEpochMs = window.nowEpochMs,
+            zoneId = zoneId
+        )
+        val previousPeriodFlow: Flow<PreviousPeriodData> = if (prevWindow == null) {
+            flowOf(PreviousPeriodData())
+        } else {
+            val (prevStart, prevEnd) = prevWindow
+            combine(
+                listeningRepository.observeSummaryInRange(prevStart, prevEnd),
+                listeningRepository.observeTopTracksInRange(
+                    startEpochMs = prevStart,
+                    endEpochMs = prevEnd,
+                    limit = PREVIOUS_RANK_LIMIT
+                ),
+                listeningRepository.observeTopArtistsInRange(
+                    startEpochMs = prevStart,
+                    endEpochMs = prevEnd,
+                    limit = PREVIOUS_RANK_LIMIT
+                )
+            ) { prevSummary, prevTracks, prevArtists ->
+                PreviousPeriodData(
+                    summary = prevSummary,
+                    topTracks = prevTracks,
+                    topArtists = prevArtists
+                )
+            }
+        }
+
+        val currentCoreFlow = combine(
             listeningRepository.observeSummary(window.sinceEpochMs),
-            listeningRepository.observeTopTracks(window.sinceEpochMs, limit = TOP_LIST_LIMIT),
-            listeningRepository.observeTopArtists(window.sinceEpochMs, limit = TOP_LIST_LIMIT),
+            listeningRepository.observeTopTracks(window.sinceEpochMs, limit = BLEND_TOP_TRACKS_LIMIT),
+            listeningRepository.observeTopArtists(window.sinceEpochMs, limit = BLEND_TOP_ARTISTS_LIMIT),
             listeningRepository.observeAllListenEventTimestamps(),
             drillDownDataFlow
-        ) { summary, topTracks, topArtists, allEvents, drillDown ->
-            val insights = ListeningInsightsCalculator.computeAll(
+        ) { summary, blendTopTracks, blendTopArtists, allEvents, drillDown ->
+            CurrentPeriodCore(
+                summary = summary,
+                blendTopTracks = blendTopTracks,
+                blendTopArtists = blendTopArtists,
                 allEvents = allEvents,
+                drillDown = drillDown
+            )
+        }
+
+        combine(currentCoreFlow, previousPeriodFlow) { core, prev ->
+            val topTracks = core.blendTopTracks.take(TOP_LIST_LIMIT)
+            val topArtists = core.blendTopArtists.take(TOP_LIST_LIMIT)
+            val insights = ListeningInsightsCalculator.computeAll(
+                allEvents = core.allEvents,
                 timeframeSinceEpochMs = window.sinceEpochMs,
                 nowEpochMs = window.nowEpochMs,
                 zoneId = zoneId
             )
+
+            val summaryDelta = ListeningInsightsCalculator.computeSummaryDelta(
+                current = core.summary,
+                previous = prev.summary
+            )
+            val trackRankDeltas = ListeningInsightsCalculator.computeRankDeltas(
+                currentKeys = topTracks.map { it.trackId },
+                previousKeys = if (prev.summary == null) null else prev.topTracks.map { it.trackId }
+            )
+            val artistRankDeltas = ListeningInsightsCalculator.computeRankDeltas(
+                currentKeys = topArtists.map { normalizeArtistKey(it.artist) },
+                previousKeys = if (prev.summary == null) null else prev.topArtists.map { normalizeArtistKey(it.artist) }
+            )
+
+            val sevenDaysCutoff = (window.nowEpochMs - 7L * 86_400_000L).coerceAtLeast(0L)
+            val (firstListenEpoch, discoveryTag) = when (val target = core.drillDown.target) {
+                null -> null to null
+                is DrillDownTarget.Track -> {
+                    val matchingEvents = core.allEvents.filter { it.trackId == target.track.trackId }
+                    val firstEpoch = matchingEvents.minOfOrNull { it.startedAtEpoch }
+                    val recent7d = matchingEvents.count { it.startedAtEpoch >= sevenDaysCutoff }
+                    val tag = ListeningInsightsCalculator.computeDiscoveryTag(
+                        firstHeardAllTimeEpoch = firstEpoch,
+                        recentPlayCount7d = recent7d,
+                        totalAllTimePlays = matchingEvents.size,
+                        nowEpochMs = window.nowEpochMs,
+                        isArtist = false
+                    )
+                    firstEpoch to tag
+                }
+                is DrillDownTarget.Artist -> {
+                    val targetKey = normalizeArtistKey(target.artist.artist)
+                    val matchingEvents = core.allEvents.filter {
+                        normalizeArtistKey(it.artistKey) == targetKey
+                    }
+                    val firstEpoch = matchingEvents.minOfOrNull { it.startedAtEpoch }
+                    val recent7d = matchingEvents.count { it.startedAtEpoch >= sevenDaysCutoff }
+                    val tag = ListeningInsightsCalculator.computeDiscoveryTag(
+                        firstHeardAllTimeEpoch = firstEpoch,
+                        recentPlayCount7d = recent7d,
+                        totalAllTimePlays = matchingEvents.size,
+                        nowEpochMs = window.nowEpochMs,
+                        isArtist = true
+                    )
+                    firstEpoch to tag
+                }
+            }
+
             StatsUiState(
                 selectedTimeframe = window.timeframe,
-                summary = summary,
+                summary = core.summary,
+                summaryDelta = summaryDelta,
                 topTracks = topTracks,
                 topArtists = topArtists,
+                blendTopTracks = core.blendTopTracks,
+                blendTopArtists = core.blendTopArtists,
+                trackRankDeltas = trackRankDeltas,
+                artistRankDeltas = artistRankDeltas,
                 insights = insights,
-                drillDownTarget = drillDown.target,
-                selectedTrackDetail = drillDown.trackDetail,
-                selectedArtistDetail = drillDown.artistDetail,
-                selectedArtistTopTracks = drillDown.artistTopTracks,
+                drillDownTarget = core.drillDown.target,
+                selectedTrackDetail = core.drillDown.trackDetail,
+                selectedArtistDetail = core.drillDown.artistDetail,
+                selectedArtistTopTracks = core.drillDown.artistTopTracks,
+                selectedDrillDownFirstListenEpoch = firstListenEpoch,
+                selectedDrillDownDiscoveryTag = discoveryTag,
                 isLoading = false
             )
         }
@@ -147,6 +252,14 @@ class StatsViewModel(
             )
         }
     }
+
+    private data class CurrentPeriodCore(
+        val summary: ListeningSummary,
+        val blendTopTracks: List<TopTrackStat>,
+        val blendTopArtists: List<TopArtistStat>,
+        val allEvents: List<com.musictracker.app.domain.model.ListenEventInsightSample>,
+        val drillDown: DrillDownData
+    )
 
     val uiState: StateFlow<StatsUiState> = combine(
         baseUiStateFlow,
@@ -301,6 +414,9 @@ class StatsViewModel(
 
     companion object {
         private const val TOP_LIST_LIMIT = 5
+        private const val BLEND_TOP_TRACKS_LIMIT = 10
+        private const val BLEND_TOP_ARTISTS_LIMIT = 15
+        private const val PREVIOUS_RANK_LIMIT = 20
 
         fun factory(
             appContainer: AppContainer,

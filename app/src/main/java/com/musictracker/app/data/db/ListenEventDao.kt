@@ -228,4 +228,61 @@ interface ListenEventDao {
         """
     )
     fun observeAllListenEventTimestamps(): Flow<List<ListenEventInsightSample>>
+
+    @Query(
+        """
+        SELECT
+            COALESCE(SUM(actual_listened_ms), 0) AS totalListenedMs,
+            COUNT(*) AS playCount,
+            COALESCE(SUM(CASE WHEN was_skipped = 1 THEN 1 ELSE 0 END), 0) AS skippedCount
+        FROM listen_events
+        WHERE started_at_epoch >= :startEpochMs AND started_at_epoch < :endEpochMs
+        """
+    )
+    fun observeSummaryRowInRange(startEpochMs: Long, endEpochMs: Long): Flow<ListeningSummaryRow>
+
+    @Query(
+        """
+        SELECT
+            t.id AS trackId,
+            t.normalized_title AS title,
+            t.normalized_artist AS artist,
+            t.album AS album,
+            t.artwork_uri_or_hash AS artworkUri,
+            COALESCE(SUM(e.actual_listened_ms), 0) AS totalListenedMs,
+            COUNT(e.id) AS playCount
+        FROM listen_events e
+        INNER JOIN tracks t ON e.track_id = t.id
+        WHERE e.started_at_epoch >= :startEpochMs AND e.started_at_epoch < :endEpochMs
+        GROUP BY t.id
+        ORDER BY totalListenedMs DESC, playCount DESC, t.id ASC
+        LIMIT :limit
+        """
+    )
+    fun observeTopTracksInRange(
+        startEpochMs: Long,
+        endEpochMs: Long,
+        limit: Int
+    ): Flow<List<TopTrackStat>>
+
+    @Query(
+        """
+        SELECT
+            MIN(TRIM(t.normalized_artist)) AS artist,
+            COALESCE(SUM(e.actual_listened_ms), 0) AS totalListenedMs,
+            COUNT(e.id) AS playCount,
+            COUNT(DISTINCT t.id) AS uniqueTrackCount
+        FROM listen_events e
+        INNER JOIN tracks t ON e.track_id = t.id
+        WHERE e.started_at_epoch >= :startEpochMs AND e.started_at_epoch < :endEpochMs
+        GROUP BY CASE WHEN INSTR(t.dedup_key, '::') > 1 THEN LOWER(TRIM(SUBSTR(t.dedup_key, 1, INSTR(t.dedup_key, '::') - 1))) ELSE LOWER(TRIM(t.normalized_artist)) END
+        ORDER BY totalListenedMs DESC, playCount DESC, artist ASC
+        LIMIT :limit
+        """
+    )
+    fun observeTopArtistsInRange(
+        startEpochMs: Long,
+        endEpochMs: Long,
+        limit: Int
+    ): Flow<List<TopArtistStat>>
 }

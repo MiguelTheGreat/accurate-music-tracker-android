@@ -16,8 +16,8 @@ android {
         applicationId = "com.musictracker.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = (project.findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 20
-        versionName = (project.findProperty("appVersionName") as String?) ?: "2.0.0"
+        versionCode = (project.findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 25
+        versionName = (project.findProperty("appVersionName") as String?) ?: "2.5.0-preview.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -125,6 +125,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.zxing.core)
 
     // Debug tooling & Compose test manifest (REQUIRED for Robolectric createComposeRule)
     debugImplementation(libs.androidx.compose.ui.tooling)

@@ -126,6 +126,35 @@ class ListeningRepositoryImpl(
     override fun observeAllListenEventTimestamps(): Flow<List<ListenEventInsightSample>> =
         listenEventDao.observeAllListenEventTimestamps()
 
+    override fun observeSummaryInRange(startEpochMs: Long, endEpochMs: Long): Flow<ListeningSummary> =
+        listenEventDao.observeSummaryRowInRange(startEpochMs, endEpochMs).map { row ->
+            val skipRate = if (row.playCount == 0) {
+                0f
+            } else {
+                row.skippedCount.toFloat() / row.playCount.toFloat()
+            }
+            ListeningSummary(
+                totalListenedMs = row.totalListenedMs,
+                playCount = row.playCount,
+                skippedCount = row.skippedCount,
+                skipRate = skipRate
+            )
+        }
+
+    override fun observeTopTracksInRange(
+        startEpochMs: Long,
+        endEpochMs: Long,
+        limit: Int
+    ): Flow<List<TopTrackStat>> =
+        listenEventDao.observeTopTracksInRange(startEpochMs, endEpochMs, limit)
+
+    override fun observeTopArtistsInRange(
+        startEpochMs: Long,
+        endEpochMs: Long,
+        limit: Int
+    ): Flow<List<TopArtistStat>> =
+        listenEventDao.observeTopArtistsInRange(startEpochMs, endEpochMs, limit)
+
     override suspend fun renormalizeAllTracks(): Int = database.withTransaction {
         val (mergedDuplicates, updatedTracks) = renormalizeTracksInTransaction()
         mergedDuplicates + updatedTracks

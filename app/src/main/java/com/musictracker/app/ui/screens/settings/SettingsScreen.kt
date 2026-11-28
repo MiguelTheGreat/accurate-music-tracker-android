@@ -27,16 +27,23 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Backup
 import androidx.compose.material.icons.rounded.CleaningServices
 import androidx.compose.material.icons.rounded.Code
+import androidx.compose.material.icons.rounded.FileUpload
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -49,12 +56,14 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.musictracker.app.data.importer.ImportFormat
 import com.musictracker.app.data.preferences.ThemeMode
 import com.musictracker.app.tracking.SystemPermissionHelper
 import com.musictracker.app.ui.components.content.StandardMaterialCard
 import com.musictracker.app.ui.components.glass.LiquidGlassBanner
 import com.musictracker.app.ui.components.glass.LiquidGlassButton
 import com.musictracker.app.ui.components.glass.LiquidGlassSegmentedControl
+import com.musictracker.app.ui.components.glass.LiquidGlassSheet
 import com.musictracker.app.ui.components.glass.LiquidGlassSwitch
 import com.musictracker.app.ui.components.glass.LiquidGlassVariant
 import com.musictracker.app.ui.navigation.TestTags
@@ -94,6 +103,19 @@ fun SettingsRoute(
     ) { uri ->
         if (uri != null) {
             viewModel.exportSqliteBackup { context.contentResolver.openOutputStream(uri) }
+        }
+    }
+
+    var pendingImportFormat by remember { mutableStateOf<ImportFormat?>(null) }
+    var showImportFormatSheet by remember { mutableStateOf(false) }
+
+    val importDocumentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        val format = pendingImportFormat
+        pendingImportFormat = null
+        if (uri != null && format != null) {
+            viewModel.importData(format) { context.contentResolver.openInputStream(uri) }
         }
     }
 
@@ -138,12 +160,39 @@ fun SettingsRoute(
             }
         },
         onDismissExportFeedback = viewModel::clearExportFeedback,
+        onImportClick = { showImportFormatSheet = true },
+        onDismissImportFeedback = viewModel::clearImportFeedback,
         onToggleReduceTransparency = viewModel::onToggleReduceTransparency,
         onToggleOnlineArtwork = viewModel::onToggleOnlineArtwork,
         onCleanLibraryClick = viewModel::cleanAndRenormalizeLibrary,
         onSelectThemeMode = viewModel::onSelectThemeMode,
         modifier = modifier
     )
+
+    if (showImportFormatSheet) {
+        ImportFormatSheet(
+            onDismiss = { showImportFormatSheet = false },
+            onSelectFormat = { format ->
+                showImportFormatSheet = false
+                pendingImportFormat = format
+                val mimeTypes = when (format) {
+                    ImportFormat.LASTFM_CSV -> arrayOf("text/csv", "text/comma-separated-values", "text/plain", "*/*")
+                    ImportFormat.COLLECTO_JSON,
+                    ImportFormat.LASTFM_JSON,
+                    ImportFormat.SPOTIFY_EXTENDED_JSON -> arrayOf("application/json", "text/plain", "*/*")
+                }
+                try {
+                    importDocumentLauncher.launch(mimeTypes)
+                } catch (_: ActivityNotFoundException) {
+                    pendingImportFormat = null
+                    viewModel.reportImportError(
+                        format,
+                        "No file manager available to open import file"
+                    )
+                }
+            }
+        )
+    }
 }
 
 @Composable
@@ -160,7 +209,9 @@ fun SettingsScreenContent(
     modifier: Modifier = Modifier,
     onToggleOnlineArtwork: (Boolean) -> Unit = {},
     onCleanLibraryClick: () -> Unit = {},
-    onSelectThemeMode: (ThemeMode) -> Unit = {}
+    onSelectThemeMode: (ThemeMode) -> Unit = {},
+    onImportClick: () -> Unit = {},
+    onDismissImportFeedback: () -> Unit = {}
 ) {
     val colors = LiquidGlassTheme.colors
     val accessibility = LiquidGlassTheme.accessibility
@@ -205,6 +256,28 @@ fun SettingsScreenContent(
                     dismissContentDescription = "Dismiss export feedback",
                     isError = isError,
                     modifier = Modifier.testTag(TestTags.SETTINGS_EXPORT_FEEDBACK)
+                )
+            }
+        }
+
+        // Import Feedback Banner (floating Regular glass when Success or Error)
+        val importState = uiState.importState
+        if (importState is ImportUiState.Success || importState is ImportUiState.Error) {
+            item(key = "settings_import_feedback") {
+                val isError = importState is ImportUiState.Error
+                val title = if (isError) "Import Failed" else "Import Complete"
+                val message = when (importState) {
+                    is ImportUiState.Success -> importState.message
+                    is ImportUiState.Error -> importState.message
+                    else -> ""
+                }
+                LiquidGlassBanner(
+                    title = title,
+                    subtitle = message,
+                    onDismiss = onDismissImportFeedback,
+                    dismissContentDescription = "Dismiss import feedback",
+                    isError = isError,
+                    modifier = Modifier.testTag("settings_import_feedback")
                 )
             }
         }
@@ -328,6 +401,39 @@ fun SettingsScreenContent(
                             maxLines = 1
                         )
                     }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+                LiquidGlassButton(
+                    onClick = onImportClick,
+                    enabled = !uiState.isImporting && !uiState.isExporting && !uiState.isCleaningLibrary,
+                    variant = LiquidGlassVariant.Regular,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("settings_import_btn")
+                ) {
+                    if (uiState.isImporting) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = colors.labelPrimary
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Rounded.FileUpload,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Text(
+                        text = if (uiState.isImporting) {
+                            "Importing History..."
+                        } else {
+                            "Import & Restore"
+                        },
+                        style = MaterialTheme.typography.labelLarge,
+                        maxLines = 1
+                    )
                 }
 
                 HorizontalDivider(
@@ -744,4 +850,110 @@ private fun SettingsSectionTitle(
         color = LiquidGlassTheme.colors.labelPrimary,
         modifier = modifier
     )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ImportFormatSheet(
+    onDismiss: () -> Unit,
+    onSelectFormat: (ImportFormat) -> Unit
+) {
+    val colors = LiquidGlassTheme.colors
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Color.Transparent,
+        dragHandle = null
+    ) {
+        LiquidGlassSheet(isExpanded = false) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = "Import & Restore History",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = colors.labelPrimary
+                )
+                Text(
+                    text = "Choose a format to merge into your local Collecto library. Duplicate listens within 5 seconds are automatically skipped.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.labelSecondary
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+
+                ImportFormatOption(
+                    title = "Collecto JSON Backup",
+                    subtitle = "Restore tracks & listens exported from Collecto",
+                    variant = LiquidGlassVariant.Prominent,
+                    onClick = { onSelectFormat(ImportFormat.COLLECTO_JSON) }
+                )
+                ImportFormatOption(
+                    title = "Spotify Extended History (JSON)",
+                    subtitle = "Streaming_History_Audio_*.json / endsong_*.json",
+                    variant = LiquidGlassVariant.Regular,
+                    onClick = { onSelectFormat(ImportFormat.SPOTIFY_EXTENDED_JSON) }
+                )
+                ImportFormatOption(
+                    title = "Last.fm Scrobbles (CSV)",
+                    subtitle = "Standard Last.fm CSV export (artist, album, track, date)",
+                    variant = LiquidGlassVariant.Regular,
+                    onClick = { onSelectFormat(ImportFormat.LASTFM_CSV) }
+                )
+                ImportFormatOption(
+                    title = "Last.fm Scrobbles (JSON)",
+                    subtitle = "Last.fm API recenttracks or JSON array export",
+                    variant = LiquidGlassVariant.Regular,
+                    onClick = { onSelectFormat(ImportFormat.LASTFM_JSON) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ImportFormatOption(
+    title: String,
+    subtitle: String,
+    variant: LiquidGlassVariant,
+    onClick: () -> Unit
+) {
+    val colors = LiquidGlassTheme.colors
+    val titleColor = if (variant == LiquidGlassVariant.Prominent) colors.onProminent else colors.labelPrimary
+    val subtitleColor = if (variant == LiquidGlassVariant.Prominent) {
+        colors.onProminent.copy(alpha = 0.8f)
+    } else {
+        colors.labelSecondary
+    }
+
+    LiquidGlassButton(
+        onClick = onClick,
+        variant = variant,
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.labelLarge,
+                color = titleColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = subtitleColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
 }

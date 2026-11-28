@@ -26,6 +26,18 @@ interface ListeningRepository {
         limit: Int = 5
     ): Flow<List<TopTrackStat>> = flowOf(emptyList())
     fun observeAllListenEventTimestamps(): Flow<List<ListenEventInsightSample>> = flowOf(emptyList())
+    fun observeSummaryInRange(startEpochMs: Long, endEpochMs: Long): Flow<ListeningSummary> =
+        flowOf(ListeningSummary())
+    fun observeTopTracksInRange(
+        startEpochMs: Long,
+        endEpochMs: Long,
+        limit: Int = 25
+    ): Flow<List<TopTrackStat>> = flowOf(emptyList())
+    fun observeTopArtistsInRange(
+        startEpochMs: Long,
+        endEpochMs: Long,
+        limit: Int = 25
+    ): Flow<List<TopArtistStat>> = flowOf(emptyList())
     suspend fun renormalizeAllTracks(): Int
     suspend fun cleanAndRenormalizeLibrary(): LibraryCleanupResult = LibraryCleanupResult()
 }

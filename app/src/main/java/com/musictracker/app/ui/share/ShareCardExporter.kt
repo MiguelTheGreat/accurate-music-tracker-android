@@ -47,12 +47,25 @@ object ShareCardExporter {
         context: Context,
         bitmap: Bitmap,
         mode: ShareCardMode
+    ): ShareExportResult = saveToGallery(
+        context = context,
+        bitmap = bitmap,
+        fileSlug = mode.name.lowercase()
+    )
+
+    suspend fun saveToGallery(
+        context: Context,
+        bitmap: Bitmap,
+        fileSlug: String
     ): ShareExportResult = withContext(Dispatchers.IO) {
         val timestamp = fileTimestampFormatter.format(
             Instant.now().atZone(ZoneId.systemDefault())
         )
-        val modeSlug = mode.name.lowercase()
-        val displayName = "Collecto_${modeSlug}_$timestamp.png"
+        val sanitizedSlug = fileSlug
+            .lowercase()
+            .replace(Regex("[^a-z0-9_-]"), "_")
+            .ifBlank { "card" }
+        val displayName = "Collecto_${sanitizedSlug}_$timestamp.png"
 
         runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {

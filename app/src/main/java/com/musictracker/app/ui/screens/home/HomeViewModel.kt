@@ -4,11 +4,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.musictracker.app.data.artwork.ArtworkRepository
+import com.musictracker.app.data.preferences.AllowlistRepository
 import com.musictracker.app.data.repository.ListeningRepository
 import com.musictracker.app.di.AppContainer
 import com.musictracker.app.domain.clock.TrackerClock
 import com.musictracker.app.domain.model.NowTrackingState
 import com.musictracker.app.domain.model.RecentListenItem
+import com.musictracker.app.domain.model.SuggestedPlayer
 import com.musictracker.app.domain.normalization.MusicMetadataNormalizer
 import com.musictracker.app.domain.tracking.PlaySessionEngine
 import com.musictracker.app.tracking.MusicNotificationListenerService
@@ -34,7 +36,9 @@ class HomeViewModel(
     private val systemPermissionHelper: SystemPermissionHelper,
     private val clock: TrackerClock,
     private val zoneId: ZoneId = ZoneId.systemDefault(),
-    private val artworkRepository: ArtworkRepository? = null
+    private val artworkRepository: ArtworkRepository? = null,
+    private val suggestedPlayerFlow: StateFlow<SuggestedPlayer?> = MutableStateFlow(null),
+    private val allowlistRepository: AllowlistRepository? = null
 ) : ViewModel() {
 
     private val isNotificationAccessGrantedFlow = MutableStateFlow(
@@ -96,11 +100,12 @@ class HomeViewModel(
 
     val uiState: StateFlow<HomeUiState> = combine(
         baseUiStateFlow,
-        artworkRevisionFlow
-    ) { state, _ ->
+        artworkRevisionFlow,
+        suggestedPlayerFlow
+    ) { state, _, suggestedPlayer ->
         val repo = artworkRepository
         if (repo == null) {
-            state
+            state.copy(suggestedPlayer = suggestedPlayer)
         } else {
             val nowTrackingPath = state.nowTracking?.let { now ->
                 val dedupKey = MusicMetadataNormalizer.buildDedupKey(
@@ -118,6 +123,7 @@ class HomeViewModel(
                 }
             }
             state.copy(
+                suggestedPlayer = suggestedPlayer,
                 nowTrackingArtworkPath = nowTrackingPath,
                 recentArtworkPaths = recentPaths
             )
@@ -189,6 +195,18 @@ class HomeViewModel(
         isFullHistoryUnlockedFlow.value = false
     }
 
+    fun trackSuggestedPlayer(packageName: String) {
+        viewModelScope.launch {
+            allowlistRepository?.setPackageAllowed(packageName, true)
+        }
+    }
+
+    fun dismissSuggestedPlayer(packageName: String) {
+        viewModelScope.launch {
+            allowlistRepository?.dismissSuggestion(packageName)
+        }
+    }
+
     companion object {
         private const val INITIAL_RECENT_HISTORY_LIMIT = 10
         private const val FULL_HISTORY_LIMIT = 500
@@ -202,7 +220,9 @@ class HomeViewModel(
                         playSessionEngine = appContainer.playSessionEngine,
                         systemPermissionHelper = appContainer.systemPermissionHelper,
                         clock = appContainer.clock,
-                        artworkRepository = appContainer.artworkRepository
+                        artworkRepository = appContainer.artworkRepository,
+                        suggestedPlayerFlow = appContainer.mediaSessionCoordinator.suggestedPlayer,
+                        allowlistRepository = appContainer.allowlistRepository
                     ) as T
                 }
             }

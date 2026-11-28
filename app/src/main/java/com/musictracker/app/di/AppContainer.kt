@@ -15,6 +15,8 @@ import com.musictracker.app.data.clock.SystemTrackerClock
 import com.musictracker.app.data.db.MusicTrackerDatabase
 import com.musictracker.app.data.export.DataExporter
 import com.musictracker.app.data.export.DataExporterImpl
+import com.musictracker.app.data.importer.DataImporter
+import com.musictracker.app.data.importer.DataImporterImpl
 import com.musictracker.app.data.preferences.AccessibilityPreferencesStore
 import com.musictracker.app.data.preferences.AllowlistRepository
 import com.musictracker.app.data.preferences.AllowlistStore
@@ -121,6 +123,14 @@ class AppContainer(
             database = database,
             dbFileProvider = { appContext.getDatabasePath(MusicTrackerDatabase.DATABASE_NAME) },
             clock = clock
+        )
+    }
+
+    val dataImporter: DataImporter by lazy {
+        DataImporterImpl(
+            database = database,
+            normalizer = metadataNormalizer,
+            ioDispatcher = ioDispatcher
         )
     }
 
